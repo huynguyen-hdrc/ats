@@ -737,8 +737,42 @@ async function runAll() {
     return 'hdrc-daily-reminders · 8h sáng hằng ngày';
   });
 
+  /* ---------- L. Sao lưu ---------- */
+  group = 'L. Sao lưu dữ liệu';
+  await t('Khách chưa đăng nhập không đọc được bản sao lưu', async () => {
+    const r = await anonGet('backups?select=slot');
+    const body = await r.json();
+    assert(r.status === 401 || (Array.isArray(body) && body.length === 0), `trả về ${r.status} với ${JSON.stringify(body).slice(0, 80)}`);
+    return `HTTP ${r.status}`;
+  });
+  await t('Khách chưa đăng nhập không gọi được hàm sao lưu', async () => {
+    const r = await fetch(`${URL_}/rest/v1/rpc/make_backup`, { method: 'POST', headers: { apikey: KEY, 'content-type': 'application/json' }, body: '{}' });
+    assert(r.status >= 400, 'gọi được — hàm đang hở!');
+    return `bị chặn, HTTP ${r.status}`;
+  });
+  await t('Chụp bản sao lưu ngay chạy được', async () => {
+    const { data, error } = await sb.rpc('make_backup');
+    if (error) throw new Error(error.message);
+    assert(Number(data.size_kb) > 0, 'file rỗng: ' + JSON.stringify(data).slice(0, 120));
+    assert(Number(data.row_counts.employees) >= 0 && Number(data.row_counts.candidates) >= 0, 'thiếu bảng trong bản sao');
+    return `slot ${data.slot} · ${data.size_kb} KB · ${Object.values(data.row_counts).reduce((a, b) => a + Number(b), 0)} dòng`;
+  });
+  await t('Bản sao lưu chứa đủ dữ liệu để phục hồi', async () => {
+    const { data, error } = await sb.from('backups').select('*').order('taken_at', { ascending: false }).limit(1).single();
+    if (error) throw new Error(error.message);
+    for (const tb of ['employees', 'candidates', 'jobs', 'stages', 'contracts', 'leave_requests', 'profiles'])
+      assert(Array.isArray(data.data[tb]), 'thiếu bảng ' + tb + ' trong bản sao');
+    return Object.keys(data.data).length + ' bảng · ' + new Date(data.taken_at).toLocaleString('vi-VN');
+  });
+  await t('Lịch sao lưu hằng ngày đã bật', async () => {
+    const { data, error } = await sb.rpc('cron_jobs_report');
+    if (error) { warn('Không đọc được lịch (' + error.message + ')'); return ''; }
+    assert(data.some(j => j.jobname === 'hdrc-daily-backup' && j.active), JSON.stringify(data));
+    return 'hdrc-daily-backup · 2h10 sáng hằng ngày';
+  });
+
   /* ---------- dọn dẹp ---------- */
-  group = 'L. Dọn dẹp dữ liệu kiểm thử';
+  group = 'M. Dọn dẹp dữ liệu kiểm thử';
   await t('Xoá sạch mọi bản ghi [SELFTEST]', async () => {
     const report = [];
     await sb.from('email_log').delete().ilike('subject', TAG + '%');
