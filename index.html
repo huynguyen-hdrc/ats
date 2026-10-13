@@ -1630,6 +1630,7 @@ function viewSettings() {
       <div class="meta">• Người mới đăng nhập lần đầu mặc định là <b>Nhân viên</b>, HR vào đây nâng quyền.</div>
       <div class="meta">• Phải gắn tài khoản với hồ sơ nhân sự thì người đó mới tạo được đơn nghỉ và thấy hợp đồng của chính mình.</div>
       <div class="meta">• Lương và hợp đồng chỉ HR/Quản trị xem được; file hồ sơ (CCCD, HĐ scan) cũng vậy.</div></div>`;
+  renderBackupPanel();
   document.querySelectorAll('[data-role]').forEach(sel => sel.onchange = async () => {
     const { error } = await sb.from('profiles').update({ role: sel.value }).eq('id', sel.dataset.role);
     if (error) return toast('Lỗi: ' + error.message, 6000);
@@ -1713,6 +1714,48 @@ async function openEmployeeDocs(empId) {
     await sb.from('employee_documents').delete().eq('id', b.dataset.docdel);
     openEmployeeDocs(empId); toast('Đã xoá');
   });
+}
+
+
+/* =================== 14. SAO LƯU DỮ LIỆU =================== */
+async function renderBackupPanel() {
+  if (!isHR()) return;
+  const { data: snaps } = await sb.from('backups').select('slot, taken_at, row_counts').order('taken_at', { ascending: false }).limit(10);
+  const rows = snaps || [];
+  const total = (rc) => Object.values(rc || {}).reduce((a, b) => a + Number(b), 0);
+  $('view').insertAdjacentHTML('beforeend', `
+    <h2 class="sec" style="margin-top:22px">Sao lưu dữ liệu</h2>
+    <div class="panel">
+      <div class="meta">Hệ thống tự chụp toàn bộ dữ liệu mỗi ngày lúc 2h10 sáng và giữ 31 bản gần nhất (mỗi ngày trong tháng một bản).
+      Bấm "Tải về" để giữ thêm một bản ngoài hệ thống — nên làm mỗi tháng một lần.</div>
+      <div class="actions" style="justify-content:flex-start;margin:12px 0">
+        <button class="btn" id="bkNow">Chụp bản sao lưu ngay</button>
+        <button class="btn primary" id="bkDown" ${rows.length ? '' : 'disabled'}>Tải bản mới nhất (.json)</button>
+      </div>
+      ${rows.length ? `<table class="grid"><thead><tr><th>Thời điểm</th><th>Tổng số dòng</th><th>Nhân sự</th><th>Ứng viên</th><th>Hợp đồng</th></tr></thead>
+        <tbody>${rows.map(b => `<tr><td>${new Date(b.taken_at).toLocaleString('vi-VN')}</td><td>${total(b.row_counts)}</td>
+          <td>${b.row_counts?.employees ?? 0}</td><td>${b.row_counts?.candidates ?? 0}</td><td>${b.row_counts?.contracts ?? 0}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="empty">Chưa có bản sao lưu nào — bấm "Chụp bản sao lưu ngay".</div>'}
+    </div>`);
+  $('bkNow').onclick = async () => {
+    $('bkNow').disabled = true;
+    const { data, error } = await sb.rpc('make_backup');
+    $('bkNow').disabled = false;
+    if (error) return toast('Lỗi sao lưu: ' + error.message, 6000);
+    toast(`Đã sao lưu ${Object.values(data.row_counts).reduce((a, b) => a + b, 0)} dòng (${data.size_kb} KB)`);
+    render();
+  };
+  $('bkDown').onclick = async () => {
+    toast('Đang chuẩn bị file...', 8000);
+    const { data, error } = await sb.from('backups').select('*').order('taken_at', { ascending: false }).limit(1).single();
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `hdrc-backup-${new Date(data.taken_at).toISOString().slice(0, 10)}.json`;
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('Đã tải file sao lưu — cất vào Drive giúp bạn nhé');
+  };
 }
 
 window.__hdrcHR = { workDays, can, isHR, VIEWS, ROLE_LABEL };
