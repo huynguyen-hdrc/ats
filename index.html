@@ -247,8 +247,13 @@ function fieldsHTML(spec, v = {}, p = 'f') {
     const id = `${p}_${f.k}`, val = v[f.k] ?? '';
     let input;
     if (f.type === 'select') {
-      input = `<select id="${id}">` + f.opts.map(o =>
-        `<option value="${esc(o[0])}" ${String(val) === String(o[0]) ? 'selected' : ''}>${esc(o[1])}</option>`).join('') + '</select>';
+      // giá trị đang lưu không có trong danh sách (vd cấp bậc nhập từ Excel):
+      // thêm hẳn một lựa chọn cho nó, nếu không select sẽ hiện mục đầu tiên và ghi đè mất dữ liệu
+      const known = f.opts.some(o => String(val) === String(o[0]));
+      const extra = (!known && val !== '' && val != null)
+        ? `<option value="${esc(val)}" selected>${esc(val)} — giá trị đang lưu (ngoài danh sách)</option>` : '';
+      input = `<select id="${id}"${extra ? ' class="odd-val"' : ''}>` + extra + f.opts.map(o =>
+        `<option value="${esc(o[0])}" ${known && String(val) === String(o[0]) ? 'selected' : ''}>${esc(o[1])}</option>`).join('') + '</select>';
     } else if (f.type === 'textarea') {
       input = `<textarea id="${id}" rows="${f.rows || 4}" placeholder="${esc(f.hint || '')}">${esc(val)}</textarea>`;
     } else {
@@ -302,11 +307,25 @@ async function upsert(table, payload, id) {
   if (r.error) { toast('Lỗi lưu: ' + r.error.message, 6000); return false; }
   await loadAll(); render(); return true;
 }
+/* File đính kèm nằm trong Storage, DB xoá dòng không chạm tới chúng.
+   Dọn luôn thư mục của bản ghi, nếu không kho đầy file không ai nhận. */
+const FILE_FOLDER = { employees: 'hr-docs', candidates: 'cvs' };
+async function purgeFiles(table, id) {
+  const bucket = FILE_FOLDER[table];
+  if (!bucket) return;
+  const ls = await sb.storage.from(bucket).list(id, { limit: 200 });
+  if (ls.error || !ls.data?.length) return;
+  const paths = ls.data.map(f => `${id}/${f.name}`);
+  const rm = await sb.storage.from(bucket).remove(paths);
+  if (rm.error) toast(`Đã xoá bản ghi nhưng còn ${paths.length} file trong kho ${bucket}: ${rm.error.message}`, 8000);
+}
 async function removeRow(table, id, label) {
   if (!guardTable(table, 'delete')) return;
   if (!confirm('Xoá ' + label + '? Không khôi phục được.')) return;
-  const r = await sb.from(table).delete().eq('id', id);
+  const r = await sb.from(table).delete().eq('id', id).select('id');
   if (r.error) return toast('Lỗi xoá: ' + r.error.message, 6000);
+  if (!r.data || !r.data.length) { await loadAll(); render(); return toast('Không xoá được — thiếu quyền hoặc bản ghi đã bị xoá', 6000); }
+  await purgeFiles(table, id);
   closeAll(); await loadAll(); render(); toast('Đã xoá');
 }
 
@@ -584,8 +603,10 @@ async function openCandidate(id) {
   $('dReject').onclick = async () => {
     if (await upsert('candidates', { status: c.status === 'active' ? 'rejected' : 'active' }, id)) openCandidate(id);
   };
-  $('dMail').onclick = () => composeEmail({ candidate: c });
-  $('dOffer').onclick = () => offerForm(null, c);
+  const liveCand = () => ({ ...c, ...toCand(readFields(spec)) });
+  window.__hdrcDrawerLive = liveCand;
+  $('dMail').onclick = () => composeEmail({ candidate: liveCand() });
+  $('dOffer').onclick = () => offerForm(null, liveCand());
   $('dAddNote').onclick = async () => {
     const body = $('dNote').value.trim(); if (!body) return;
     if (!guard('candidates', 'comment')) return;
@@ -709,10 +730,14 @@ function openJob(id) {
     ${cands.map(c => `<div class="meta">• ${esc(c.full_name)} — ${esc(state.stages.find(s => s.key === c.stage)?.label || c.stage)}${c.status !== 'active' ? ' (' + c.status + ')' : ''}</div>`).join('') || '<div class="empty">Chưa có ứng viên</div>'}`);
   $('jSave').onclick = async () => { if (await upsert('jobs', toJob(readFields(JOB_SPEC)), id)) { openJob(id); toast('Đã lưu'); } };
   $('jDel').onclick = () => removeRow('jobs', id, 'vị trí ' + j.title);
-  $('jPrint').onclick = () => printJD(j);
+  // lấy bản đang hiển thị trên form, không lấy bản ghi lúc mở drawer — nếu không sửa chưa lưu sẽ bị bỏ qua
+  const liveJob = () => ({ ...j, ...toJob(readFields(JOB_SPEC)) });
+  window.__hdrcDrawerLive = liveJob;
+  $('jPrint').onclick = () => printJD(liveJob());
   $('jCopy').onclick = async () => {
-    try { await navigator.clipboard.writeText(jdText(j)); toast('Đã copy JD vào clipboard'); }
-    catch { openModal('JD — ' + j.title, `<textarea rows="20" style="width:100%">${esc(jdText(j))}</textarea>`); }
+    const cur = liveJob();
+    try { await navigator.clipboard.writeText(jdText(cur)); toast('Đã copy JD vào clipboard'); }
+    catch { openModal('JD — ' + cur.title, `<textarea rows="20" style="width:100%">${esc(jdText(cur))}</textarea>`); }
   };
 }
 
@@ -1377,10 +1402,6 @@ function wireXlsx() {
   document.querySelectorAll('[data-xl-imp]').forEach(b => b.onclick = () => pickImport(b.dataset.xlImp));
   document.querySelectorAll('[data-xl-exp]').forEach(b => b.onclick = () => exportSheet(b.dataset.xlExp).catch(e => toast(e.message, 6000)));
 }
-window.__hdrc = { SHEETS, parseAoa, xlDate, xlNum, cellOut, xlText, today, dayDiff, addDays };
-// bộ test chạy app trong iframe ẩn và cần nạp lại dữ liệu sau khi nó tạo bản ghi mới
-window.__hdrcReload = async () => { await loadAll(); render(); };
-window.__hdrcState = () => state;
 
 
 /* =================== 9. OFFER LETTER & EMAIL =================== */
@@ -1409,6 +1430,13 @@ function offerVars(o) {
     han_phan_hoi: o.expires_on ? d(o.expires_on) : '', thoi_gian_phong_van: '', ket_qua_thu_viec: ''
   };
 }
+/* Thư mời tự điền mặc định cho thử việc khi offer để trống.
+   Phải nói ra, nếu không thư sẽ mâu thuẫn với dữ liệu đã lưu. */
+const OFFER_DEFAULTS = [
+  ['probation_months', 2, 'thời gian thử việc (mặc định 2 tháng)'],
+  ['probation_salary_pct', 85, 'lương thử việc (mặc định 85%)']
+];
+const offerDefaulted = (o) => OFFER_DEFAULTS.filter(([k]) => o[k] === null || o[k] === undefined || o[k] === '').map(x => x[2]);
 const OFFER_SPEC = () => [
   { k: 'candidate_name', label: 'Tên ứng viên *', req: true },
   { k: 'candidate_email', label: 'Email ứng viên' },
@@ -1457,11 +1485,11 @@ function offerLetterHTML(o) {
   const tpl = state.templates.find(t => t.key === 'offer_letter');
   const vars = offerVars(o);
   const { out, missing } = renderTpl(tpl?.body || '', vars);
-  return { text: out, missing, subject: renderTpl(tpl?.subject || '', vars).out };
+  return { text: out, missing, defaulted: offerDefaulted(o), subject: renderTpl(tpl?.subject || '', vars).out };
 }
 function openOffer(id) {
   const o = state.offers.find(x => x.id === id); if (!o) return;
-  const { text, missing } = offerLetterHTML(o);
+  const { text, missing, defaulted } = offerLetterHTML(o);
   const mails = state.emails.filter(e => e.offer_id === id);
   openDrawer('Offer — ' + o.candidate_name, `
     <div class="tags" style="margin-bottom:10px">
@@ -1472,6 +1500,8 @@ function openOffer(id) {
     </div>
     ${missing.length ? `<div class="panel" style="border-color:#e8d3ae;background:#fffaf0;margin-bottom:10px">
       <b>Còn thiếu thông tin:</b> <span class="meta">${esc(missing.join(', '))}</span> — các chỗ này hiện dấu "…" trong thư.</div>` : ''}
+    ${defaulted.length ? `<div class="panel" style="border-color:#e8d3ae;background:#fffaf0;margin-bottom:10px">
+      <b>Thư đang dùng giá trị mặc định:</b> <span class="meta">${esc(defaulted.join('; '))}</span> — offer này để trống nên thư tự điền. Bấm "Sửa" để ghi đúng con số đã thoả thuận.</div>` : ''}
     <div class="panel" style="white-space:pre-wrap;max-height:300px;overflow:auto">${esc(text)}</div>
     <div class="actions" style="margin-top:12px">
       <button class="btn danger" id="oDel">Xoá</button>
@@ -1628,12 +1658,19 @@ function composeEmail({ candidate, offer, employee, templateKey } = {}) {
       <button class="btn primary hide" id="emSend">Gửi ngay</button>
     </div>
     <div class="meta" style="margin-top:8px">Gmail mở sẵn thư đã điền; bấm Gửi trong Gmail là xong. Thư sẽ nằm trong hộp Sent của bạn.</div>`);
+  const warnText = (dft) => {
+    const parts = [];
+    if (dft.missing.length) parts.push('Thiếu dữ liệu: ' + dft.missing.join(', ') + ' (hiện dấu "…", sửa tay trước khi gửi)');
+    const dfl = offer ? offerDefaulted(offer) : [];
+    if (dfl.length) parts.push('Thư đang dùng giá trị mặc định: ' + dfl.join('; ') + ' — kiểm tra trước khi gửi');
+    return parts.join(' · ');
+  };
   const refresh = () => {
     const k = $('emTpl').value, dft = draw(k);
     $('emSub').value = dft.subject; $('emBody').value = dft.body;
-    $('emWarn').textContent = dft.missing.length ? 'Thiếu dữ liệu: ' + dft.missing.join(', ') + ' (hiện dấu "…", sửa tay trước khi gửi)' : '';
+    $('emWarn').textContent = warnText(dft);
   };
-  $('emWarn').textContent = first.missing.length ? 'Thiếu dữ liệu: ' + first.missing.join(', ') + ' (hiện dấu "…", sửa tay trước khi gửi)' : '';
+  $('emWarn').textContent = warnText(first);
   $('emTpl').onchange = refresh;
   $('emCancel').onclick = closeAll;
   const logRow = (channel, status, error) => ({
@@ -2256,6 +2293,12 @@ async function boot(session) {
   state.me = session.user.email;
   if (await loadAll()) render();
 }
+/* ---------- cửa sổ cho bộ self-test (đặt cuối file: mọi hàm đã khai báo xong) ---------- */
+window.__hdrc = { SHEETS, parseAoa, xlDate, xlNum, cellOut, xlText, today, dayDiff, addDays };
+window.__hdrcReload = async () => { await loadAll(); render(); };   // iframe ẩn phải nạp lại sau khi test tạo bản ghi
+window.__hdrcState = () => state;
+window.__hdrcUI = { fieldsHTML, readFields, offerDefaulted };
+
 boot();
 </script>
 </body>

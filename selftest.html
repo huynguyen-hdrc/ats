@@ -41,7 +41,7 @@ iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
     <div><b id="kFail">–</b><span class="sub">Lỗi</span></div>
     <div><b id="kWarn">–</b><span class="sub">Cảnh báo</span></div>
     <div><b id="kTime">–</b><span class="sub">Thời gian</span></div>
-    <div><b id="kBuild">20261014-0315</b><span class="sub">Phiên bản bộ test</span></div>
+    <div><b id="kBuild">20261014-0345</b><span class="sub">Phiên bản bộ test</span></div>
   </div>
   <table id="out"><thead><tr><th style="width:60px">KQ</th><th>Hạng mục</th><th>Chi tiết</th></tr></thead><tbody></tbody></table>
   <div id="log"></div>
@@ -391,6 +391,48 @@ async function runAll() {
     await new Promise(r => setTimeout(r, 400));
     assert(w.document.getElementById('view').textContent.includes(TAG), 'không thấy vị trí kiểm thử');
     return 'khớp dữ liệu DB';
+  });
+  await t('In JD / Sao chép JD dùng nội dung đang sửa, không dùng bản cũ', async () => {
+    const w = frame.contentWindow;
+    [...w.document.querySelectorAll('nav button')].find(b => b.dataset.v === 'jobs').click();
+    await new Promise(r => setTimeout(r, 400));
+    const card = [...w.document.querySelectorAll('.panel[data-id]')].find(p => p.textContent.includes(TAG));
+    assert(card, 'không thấy thẻ vị trí kiểm thử');
+    card.click();
+    await new Promise(r => setTimeout(r, 300));
+    assert(typeof w.__hdrcDrawerLive === 'function', 'drawer không expose bản đang sửa');
+    const before = w.__hdrcDrawerLive().title;
+    const edited = TAG + ' Tieu de vua sua ' + Date.now();
+    const inp = w.document.getElementById('f_title');
+    assert(inp, 'không thấy ô tiêu đề trong drawer');
+    inp.value = edited;
+    const after = w.__hdrcDrawerLive().title;
+    w.document.getElementById('dClose').click();
+    assert(after === edited, `vẫn lấy bản cũ "${after}" thay vì "${edited}"`);
+    assert(before !== edited, 'phép thử không hợp lệ: giá trị trước và sau giống nhau');
+    return 'sửa chưa lưu vẫn vào đúng bản in';
+  });
+  await t('Ô chọn giữ nguyên giá trị lạ đang lưu, không nhảy về mục đầu', async () => {
+    const w = frame.contentWindow;
+    const { fieldsHTML, readFields } = w.__hdrcUI;
+    const spec = [{ k: 'level', label: 'Cấp bậc', type: 'select', opts: [['', '—'], ['staff', 'Nhân viên'], ['lead', 'Trưởng nhóm']] }];
+    const box = w.document.createElement('div');
+    box.innerHTML = fieldsHTML(spec, { level: 'Senior' }, 'zz');
+    w.document.body.appendChild(box);
+    const got = readFields(spec, 'zz').level;
+    const first = w.document.getElementById('zz_level').options[0].value;
+    box.remove();
+    assert(got === 'Senior', `đọc lại ra "${got}" thay vì "Senior" — giá trị cũ bị ghi đè`);
+    assert(first === 'Senior', 'giá trị lạ phải được thêm vào danh sách và chọn sẵn');
+    return 'giá trị "Senior" ngoài danh sách vẫn giữ nguyên';
+  });
+  await t('Offer để trống thử việc thì báo rõ là đang dùng mặc định', async () => {
+    const { offerDefaulted } = frame.contentWindow.__hdrcUI;
+    const blank = offerDefaulted({ probation_months: null, probation_salary_pct: null });
+    const full = offerDefaulted({ probation_months: 3, probation_salary_pct: 90 });
+    assert(blank.length === 2, 'không báo mặc định: ' + JSON.stringify(blank));
+    assert(full.length === 0, 'báo nhầm khi đã điền đủ: ' + JSON.stringify(full));
+    return blank.join('; ');
   });
   await t('Kanban hiện đủ 7 cột vòng tuyển dụng', async () => {
     const w = frame.contentWindow;
@@ -891,6 +933,31 @@ async function runAll() {
     const { data: base } = await sb.rpc('my_role');
     assert(typeof data === 'boolean', 'has_perm trả về ' + JSON.stringify(data));
     return `vai trò gốc ${base} · quyền duyệt nghỉ phép: ${data ? 'có' : 'không'}`;
+  });
+  await t('Chính sách ĐỌC của các bảng chính gọi has_perm, không chỉ dựa vào vai trò gốc', async () => {
+    const { data, error } = await sb.rpc('read_policy_report');
+    if (error) throw new Error(error.message + ' — thiếu hàm read_policy_report?');
+    const need = { employees_read: 'employees', jobs_read: 'jobs', candidates_read: 'candidates',
+      candidate_events_read: 'candidates', offers_read: 'offers', email_log_read: 'mail', notif_read: 'reports' };
+    const got = Object.fromEntries(data.map(r => [r.policy_name, r.expr]));
+    for (const [pol, mod] of Object.entries(need)) {
+      assert(got[pol], 'không tìm thấy chính sách ' + pol);
+      assert(got[pol].includes(`has_perm('${mod}'`), `${pol} chưa gọi has_perm('${mod}'…): ${got[pol]}`);
+    }
+    return Object.keys(need).length + ' chính sách đọc đã gắn ma trận quyền';
+  });
+  await t('Siết RLS không làm ai mất quyền xem so với trước', async () => {
+    const { data, error } = await sb.rpc('view_perm_matrix');
+    if (error) throw new Error(error.message);
+    const by = {};
+    for (const r of data) (by[r.role_key] ||= {})[r.module] = r.allowed;
+    // những quyền xem mọi vai trò vẫn phải giữ (trước đây policy để true)
+    for (const role of ['admin', 'hr', 'manager', 'staff'])
+      for (const mod of ['employees', 'jobs'])
+        assert(by[role] && by[role][mod] === true, `${role} mất quyền xem "${mod}" — đây là bước lùi`);
+    for (const role of ['admin', 'hr', 'manager'])
+      assert(by[role].candidates === true, role + ' mất quyền xem ứng viên');
+    return 'admin/hr/manager/staff giữ nguyên quyền xem như trước khi siết';
   });
   await t('Tài khoản thường không đọc được bảng quyền qua anon', async () => {
     const r = await anonGet('role_perms?select=role_key');
