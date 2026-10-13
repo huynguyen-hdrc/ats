@@ -52,7 +52,7 @@ const URL_ = 'https://hzsybxvvcexayducvfll.supabase.co', KEY = 'sb_publishable_j
 const sb = createClient(URL_, KEY);
 const TAG = '[SELFTEST]';
 const results = [];
-const made = { jobs: [], candidates: [], employees: [], onboarding_templates: [] };
+const made = { jobs: [], candidates: [], employees: [], onboarding_templates: [], offers: [] };
 let group = '';
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $('log').textContent += m + '\n'; };
@@ -487,19 +487,106 @@ async function runAll() {
     return 'ghi file thật → đọc lại → 9 trường khớp nguyên vẹn';
   });
 
+  /* ---------- G. Offer letter & email ---------- */
+  group = 'G. Offer letter & gửi email';
+  let offer;
+  await t('Có đủ mẫu thư dựng sẵn', async () => {
+    const { data } = await sb.from('email_templates').select('key, subject, body');
+    const keys = data.map(x => x.key);
+    for (const k of ['offer_letter', 'interview_invite', 'rejection']) assert(keys.includes(k), 'thiếu mẫu ' + k);
+    const off = data.find(x => x.key === 'offer_letter');
+    assert(off.body.includes('{{luong}}') && off.body.includes('{{ngay_bat_dau}}'), 'mẫu offer thiếu biến lương/ngày bắt đầu');
+    return keys.length + ' mẫu: ' + keys.join(', ');
+  });
+  await t('Điền biến vào mẫu thư đúng và báo biến còn thiếu', async () => {
+    const { renderTpl } = W().__hdrcMail;
+    const r = renderTpl('Chào {{ung_vien}}, vị trí {{vi_tri}}, lương {{luong}}', { ung_vien: 'A', vi_tri: 'Staff' });
+    assert(r.out === 'Chào A, vị trí Staff, lương …', 'kết quả: ' + r.out);
+    assert(r.missing.join() === 'luong', 'missing: ' + r.missing.join());
+    return 'biến thiếu hiện "…" và được liệt kê';
+  });
+  await t('Tạo offer từ ứng viên, mặc định là Nháp', async () => {
+    offer = await ins('offers', { candidate_id: cand.id, job_id: job.id, candidate_name: TAG + ' Ung vien',
+      candidate_email: 'selftest@example.com', position_title: 'QA Engineer', department: 'QA',
+      salary_gross: 20000000, start_date: '2026-11-01', expires_on: '2026-10-25', manager_name: 'Huy',
+      signer_name: 'Huy Nguyen', signer_title: 'Giám đốc', work_location: 'HCM' });
+    assert(offer.status === 'draft', 'trạng thái = ' + offer.status);
+    assert(Number(offer.probation_months) === 2 && offer.probation_salary_pct === 85, 'mặc định thử việc sai');
+    return 'draft · thử việc 2 tháng · 85%';
+  });
+  await t('Thư offer sinh ra đủ nội dung, không còn chỗ trống kỹ thuật', async () => {
+    const { renderTpl, offerVars } = W().__hdrcMail;
+    const { data: tpl } = await sb.from('email_templates').select('body, subject').eq('key', 'offer_letter').single();
+    const r = renderTpl(tpl.body, offerVars(offer));
+    assert(!r.out.includes('{{'), 'còn sót biến chưa thay');
+    assert(r.out.includes(TAG + ' Ung vien'), 'thiếu tên ứng viên');
+    assert(r.out.includes('20.000.000'), 'lương chưa định dạng: ' + r.out.slice(0, 120));
+    assert(r.out.includes('QA Engineer'), 'thiếu vị trí');
+    assert(!r.missing.length, 'còn thiếu: ' + r.missing.join());
+    return 'tên · vị trí · lương 20.000.000 · ngày bắt đầu đủ';
+  });
+  await t('Trạng thái offer sai bị chặn', async () => {
+    const { error } = await sb.from('offers').update({ status: 'xyz' }).eq('id', offer.id);
+    assert(error, 'DB nhận trạng thái rác');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Ghi lịch sử email và đọc lại được', async () => {
+    const row = { candidate_id: cand.id, offer_id: offer.id, template_key: 'offer_letter',
+      to_email: 'selftest@example.com', subject: TAG + ' thu moi nhan viec', body: 'noi dung thu '.repeat(5),
+      channel: 'gmail', status: 'opened_in_gmail' };
+    const { error } = await sb.from('email_log').insert(row);
+    if (error) throw new Error(error.message);
+    const { data } = await sb.from('email_log').select('*').eq('offer_id', offer.id);
+    assert(data.length === 1 && data[0].to_email === 'selftest@example.com', JSON.stringify(data));
+    return 'ghi 1 dòng, đọc lại khớp';
+  });
+  await t('Kênh gửi lạ bị chặn', async () => {
+    const { error } = await sb.from('email_log').insert({ to_email: 'a@b.com', subject: 'x', body: 'y', channel: 'bo-cau' });
+    assert(error, 'DB nhận kênh rác');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Chức năng gửi email bắt buộc đăng nhập', async () => {
+    const r = await fetch(`${URL_}/functions/v1/send-email`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ probe: true }) });
+    assert(r.status === 401, 'HTTP ' + r.status);
+    return 'HTTP 401';
+  });
+  await t('Gửi tự động (Resend) báo đúng trạng thái cấu hình', async () => {
+    const { data, error } = await sb.functions.invoke('send-email', { body: { probe: true } });
+    if (error) throw new Error(error.message);
+    assert(typeof data.configured === 'boolean', 'phản hồi lạ: ' + JSON.stringify(data));
+    if (!data.configured) warn('Chưa gắn RESEND_API_KEY nên app dùng đường Gmail; nút "Gửi ngay" tự ẩn — đúng thiết kế');
+    return 'đã cấu hình, gửi từ ' + data.from;
+  });
+  await t('Email người nhận sai định dạng bị từ chối', async () => {
+    const { data } = await sb.functions.invoke('send-email', { body: { to: 'khong-phai-email', subject: 'x', text: 'y'.repeat(20) } });
+    assert(data && data.error, 'không báo lỗi: ' + JSON.stringify(data));
+    return data.error;
+  });
+  await t('Xoá ứng viên không làm mất offer đã phát hành', async () => {
+    const tmpC = await ins('candidates', { full_name: TAG + ' Ung vien tam' });
+    const tmpO = await ins('offers', { candidate_id: tmpC.id, candidate_name: TAG + ' tam', position_title: 'X' });
+    await sb.from('candidates').delete().eq('id', tmpC.id);
+    made.candidates = made.candidates.filter(x => x !== tmpC.id);
+    const { data } = await sb.from('offers').select('candidate_id').eq('id', tmpO.id).single();
+    assert(data, 'offer bị xoá theo ứng viên');
+    assert(data.candidate_id === null, 'liên kết phải trống, đang là ' + data.candidate_id);
+    return 'offer giữ lại, liên kết ứng viên để trống';
+  });
+
   /* ---------- dọn dẹp ---------- */
-  group = 'G. Dọn dẹp dữ liệu kiểm thử';
+  group = 'H. Dọn dẹp dữ liệu kiểm thử';
   await t('Xoá sạch mọi bản ghi [SELFTEST]', async () => {
     const report = [];
-    for (const tb of ['candidates', 'jobs', 'employees']) {
+    await sb.from('email_log').delete().ilike('subject', TAG + '%');
+    for (const tb of ['offers', 'candidates', 'jobs', 'employees']) {
       const ids = made[tb]; if (!ids.length) continue;
       const { error } = await sb.from(tb).delete().in('id', ids);
       if (error) throw new Error(tb + ': ' + error.message);
       report.push(`${tb}:${ids.length}`);
       made[tb] = [];
     }
-    for (const tb of ['candidates', 'employees', 'jobs']) {
-      const { data } = await sb.from(tb).select('id').ilike(tb === 'jobs' ? 'title' : 'full_name', TAG + '%');
+    for (const [tb, col] of [['candidates', 'full_name'], ['employees', 'full_name'], ['jobs', 'title'], ['offers', 'candidate_name'], ['email_log', 'subject']]) {
+      const { data } = await sb.from(tb).select('id').ilike(col, TAG + '%');
       assert(!data.length, `còn sót ${data.length} dòng ở ${tb}`);
     }
     return report.join(', ') || 'không còn gì';

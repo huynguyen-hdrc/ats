@@ -166,7 +166,8 @@ function daysAgo(ts) {
   return n <= 0 ? 'hôm nay' : n + ' ngày';
 }
 const state = { view: 'pipeline', q: '', job: '', showClosed: false, drag: null,
-  stages: [], jobs: [], candidates: [], employees: [], contracts: [], obItems: [], obTemplates: [], reviews: [] };
+  stages: [], jobs: [], candidates: [], employees: [], contracts: [], obItems: [], obTemplates: [], reviews: [],
+  templates: [], offers: [], emails: [], me: '', resend: null };
 
 /* ---------- generic form engine ---------- */
 function fieldsHTML(spec, v = {}, p = 'f') {
@@ -238,11 +239,15 @@ async function loadAll() {
     sb.from('contracts').select('*').order('end_date', { nullsFirst: false }),
     sb.from('onboarding_items').select('*').order('sort_order'),
     sb.from('onboarding_templates').select('*, onboarding_template_items(*)').order('name'),
-    sb.from('probation_reviews').select('*').order('review_date', { ascending: false })
+    sb.from('probation_reviews').select('*').order('review_date', { ascending: false }),
+    sb.from('email_templates').select('*').order('name'),
+    sb.from('offers').select('*').order('created_at', { ascending: false }),
+    sb.from('email_log').select('*').order('created_at', { ascending: false }).limit(300)
   ]);
   const bad = r.find(x => x.error);
   if (bad) { toast('Lỗi tải dữ liệu: ' + bad.error.message, 6000); return false; }
-  [state.stages, state.jobs, state.candidates, state.employees, state.contracts, state.obItems, state.obTemplates, state.reviews] = r.map(x => x.data);
+  [state.stages, state.jobs, state.candidates, state.employees, state.contracts, state.obItems, state.obTemplates,
+   state.reviews, state.templates, state.offers, state.emails] = r.map(x => x.data);
   return true;
 }
 const empName = (id) => state.employees.find(e => e.id === id)?.full_name || '';
@@ -256,13 +261,14 @@ const VIEWS = [
   ['org', 'Sơ đồ tổ chức'],
   ['onboarding', 'Onboarding'],
   ['contracts', 'Hợp đồng'],
-  ['probation', 'Thử việc']
+  ['probation', 'Thử việc'],
+  ['mail', 'Thư & Email']
 ];
 function render() {
   $('nav').innerHTML = VIEWS.map(([k, l]) => `<button data-v="${k}" class="${state.view === k ? 'on' : ''}">${l}</button>`).join('');
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.v; state.q = ''; render(); });
   ({ pipeline: viewPipeline, jobs: viewJobs, people: viewPeople, org: viewOrg,
-     onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation })[state.view]();
+     onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation, mail: viewMail })[state.view]();
   wireXlsx();
 }
 function searchBox(ph) {
@@ -385,6 +391,8 @@ async function openCandidate(id) {
   $('dBody').innerHTML = `<div class="row2">${fieldsHTML(spec, fromCand(c))}</div>
     <div class="actions">
       <button class="btn danger" id="dReject">${c.status === 'active' ? 'Loại ứng viên' : 'Mở lại'}</button>
+      <button class="btn" id="dMail">Soạn email</button>
+      <button class="btn" id="dOffer">Tạo offer</button>
       <button class="btn primary" id="dSave">Lưu</button></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
     <div class="field"><label>Thêm ghi chú</label><textarea id="dNote" rows="3" placeholder="Nhận xét phỏng vấn, mức lương mong muốn..."></textarea></div>
@@ -398,6 +406,8 @@ async function openCandidate(id) {
   $('dReject').onclick = async () => {
     if (await upsert('candidates', { status: c.status === 'active' ? 'rejected' : 'active' }, id)) openCandidate(id);
   };
+  $('dMail').onclick = () => composeEmail({ candidate: c });
+  $('dOffer').onclick = () => offerForm(null, c);
   $('dAddNote').onclick = async () => {
     const body = $('dNote').value.trim(); if (!body) return;
     const { error } = await sb.from('candidate_events').insert({ candidate_id: id, type: 'note', body });
@@ -1096,6 +1106,280 @@ function wireXlsx() {
 }
 window.__hdrc = { SHEETS, parseAoa, xlDate, xlNum, cellOut };
 
+
+/* =================== 9. OFFER LETTER & EMAIL =================== */
+const TPL_VARS = ['cong_ty', 'ung_vien', 'vi_tri', 'phong_ban', 'phong_ban_clause', 'luong', 'phu_cap', 'ngay_bat_dau',
+  'thu_viec', 'luong_thu_viec', 'noi_lam_viec', 'thoi_gian_lam_viec', 'quan_ly', 'nguoi_ky', 'chuc_vu_nguoi_ky',
+  'han_phan_hoi', 'thoi_gian_phong_van', 'ket_qua_thu_viec'];
+const COMPANY = 'HeliDirect';
+function renderTpl(text, vars) {
+  const missing = [];
+  const out = String(text || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_m, k) => {
+    const v = vars[k];
+    if (v === undefined || v === null || v === '') { missing.push(k); return '…'; }
+    return String(v);
+  });
+  return { out, missing: [...new Set(missing)] };
+}
+function offerVars(o) {
+  return {
+    cong_ty: COMPANY, ung_vien: o.candidate_name, vi_tri: o.position_title,
+    phong_ban: o.department, phong_ban_clause: o.department ? `, phòng ${o.department}` : '',
+    luong: o.salary_gross != null ? money(o.salary_gross) : '', phu_cap: o.allowance || 'theo chính sách công ty',
+    ngay_bat_dau: o.start_date ? d(o.start_date) : '', thu_viec: o.probation_months ?? 2,
+    luong_thu_viec: o.probation_salary_pct ?? 85, noi_lam_viec: o.work_location,
+    thoi_gian_lam_viec: o.work_time || 'Thứ 2 - Thứ 6, 8h30 - 17h30',
+    quan_ly: o.manager_name, nguoi_ky: o.signer_name, chuc_vu_nguoi_ky: o.signer_title,
+    han_phan_hoi: o.expires_on ? d(o.expires_on) : '', thoi_gian_phong_van: '', ket_qua_thu_viec: ''
+  };
+}
+const OFFER_SPEC = () => [
+  { k: 'candidate_name', label: 'Tên ứng viên *', req: true },
+  { k: 'candidate_email', label: 'Email ứng viên' },
+  { k: 'position_title', label: 'Vị trí *' },
+  { k: 'department', label: 'Phòng ban' },
+  { k: 'salary_gross', label: 'Lương chính thức (gross, VNĐ)', type: 'number' },
+  { k: 'allowance', label: 'Phụ cấp' },
+  { k: 'start_date', label: 'Ngày bắt đầu', type: 'date' },
+  { k: 'probation_months', label: 'Thử việc (tháng)', type: 'number', step: '0.5' },
+  { k: 'probation_salary_pct', label: 'Lương thử việc (%)', type: 'number' },
+  { k: 'work_location', label: 'Nơi làm việc' },
+  { k: 'work_time', label: 'Thời gian làm việc' },
+  { k: 'manager_name', label: 'Quản lý trực tiếp' },
+  { k: 'signer_name', label: 'Người ký' },
+  { k: 'signer_title', label: 'Chức vụ người ký' },
+  { k: 'expires_on', label: 'Hạn phản hồi', type: 'date' },
+  { k: 'status', label: 'Trạng thái', type: 'select', opts: [['draft', 'Nháp'], ['sent', 'Đã gửi'], ['accepted', 'Ứng viên đồng ý'], ['declined', 'Ứng viên từ chối'], ['expired', 'Hết hạn']] },
+  { k: 'note', label: 'Ghi chú nội bộ', type: 'textarea', wide: true, rows: 2 }
+];
+const OFFER_STATUS = { draft: 'Nháp', sent: 'Đã gửi', accepted: 'Đồng ý', declined: 'Từ chối', expired: 'Hết hạn' };
+
+function offerForm(id, cand) {
+  const o = id ? state.offers.find(x => x.id === id) : null;
+  const job = cand ? state.jobs.find(j => j.id === cand.job_id) : null;
+  const values = o || {
+    candidate_id: cand?.id || null, job_id: cand?.job_id || null,
+    candidate_name: cand?.full_name || '', candidate_email: cand?.email || '',
+    position_title: job?.title || cand?.current_title || '', department: job?.department || '',
+    salary_gross: null, start_date: addDays(today(), 14), probation_months: 2, probation_salary_pct: 85,
+    work_location: job?.location || 'TP. Hồ Chí Minh', work_time: 'Thứ 2 - Thứ 6, 8h30 - 17h30',
+    manager_name: job?.hiring_manager || '', signer_name: '', signer_title: 'Giám đốc',
+    expires_on: addDays(today(), 7), status: 'draft'
+  };
+  const spec = OFFER_SPEC();
+  formModal(id ? 'Sửa offer' : 'Tạo offer letter', spec, values, async (raw) => {
+    const payload = { ...raw, candidate_id: values.candidate_id, job_id: values.job_id };
+    if (!payload.candidate_name || !payload.position_title) return toast('Cần tên ứng viên và vị trí');
+    const r = id ? await sb.from('offers').update(payload).eq('id', id).select().single()
+                 : await sb.from('offers').insert(payload).select().single();
+    if (r.error) return toast('Lỗi lưu offer: ' + r.error.message, 6000);
+    closeAll(); await loadAll(); render(); openOffer(r.data.id);
+  });
+}
+function offerLetterHTML(o) {
+  const tpl = state.templates.find(t => t.key === 'offer_letter');
+  const vars = offerVars(o);
+  const { out, missing } = renderTpl(tpl?.body || '', vars);
+  return { text: out, missing, subject: renderTpl(tpl?.subject || '', vars).out };
+}
+function openOffer(id) {
+  const o = state.offers.find(x => x.id === id); if (!o) return;
+  const { text, missing } = offerLetterHTML(o);
+  const mails = state.emails.filter(e => e.offer_id === id);
+  openDrawer('Offer — ' + o.candidate_name, `
+    <div class="tags" style="margin-bottom:10px">
+      <span class="tag ${o.status === 'accepted' ? 'ok' : o.status === 'declined' ? 'warn' : 'soon'}">${OFFER_STATUS[o.status]}</span>
+      ${o.salary_gross ? `<span class="tag">${money(o.salary_gross)}đ</span>` : ''}
+      ${o.start_date ? `<span class="tag">bắt đầu ${d(o.start_date)}</span>` : ''}
+      ${o.expires_on ? `<span class="tag ${dayDiff(o.expires_on) < 0 ? 'warn' : ''}">hạn ${d(o.expires_on)}</span>` : ''}
+    </div>
+    ${missing.length ? `<div class="panel" style="border-color:#e8d3ae;background:#fffaf0;margin-bottom:10px">
+      <b>Còn thiếu thông tin:</b> <span class="meta">${esc(missing.join(', '))}</span> — các chỗ này hiện dấu "…" trong thư.</div>` : ''}
+    <div class="panel" style="white-space:pre-wrap;max-height:300px;overflow:auto">${esc(text)}</div>
+    <div class="actions" style="margin-top:12px">
+      <button class="btn danger" id="oDel">Xoá</button>
+      <button class="btn" id="oEdit">Sửa</button>
+      <button class="btn" id="oPdf">In / Lưu PDF</button>
+      <button class="btn primary" id="oMail">Gửi email</button>
+    </div>
+    <h4 style="margin:18px 0 8px">Email đã soạn (${mails.length})</h4>
+    ${mails.map(m => `<div class="meta">• ${new Date(m.created_at).toLocaleString('vi-VN')} → ${esc(m.to_email)} · ${esc(m.channel)} · ${esc(m.status)}</div>`).join('') || '<div class="empty">Chưa gửi lần nào</div>'}`);
+  $('oEdit').onclick = () => offerForm(id);
+  $('oDel').onclick = () => removeRow('offers', id, 'offer của ' + o.candidate_name);
+  $('oPdf').onclick = () => printLetter(o);
+  $('oMail').onclick = () => composeEmail({ offer: o, templateKey: 'offer_letter' });
+}
+function printLetter(o) {
+  const { text } = offerLetterHTML(o);
+  const w = window.open('', '_blank', 'width=900,height=1000');
+  if (!w) return toast('Trình duyệt chặn cửa sổ in — cho phép popup rồi thử lại', 6000);
+  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Offer - ${esc(o.candidate_name)}</title>
+    <style>@page{size:A4;margin:22mm 20mm}
+      body{font:12.5pt/1.65 "Times New Roman",Georgia,serif;color:#111}
+      .hd{display:flex;justify-content:space-between;border-bottom:2px solid #0f7a63;padding-bottom:8px;margin-bottom:20px}
+      .hd b{font-size:17pt;letter-spacing:.5px;color:#0f7a63}
+      .meta{font-size:10pt;color:#555}
+      pre{white-space:pre-wrap;font:inherit;margin:0}
+      .sign{margin-top:46px}
+      @media print{.noprint{display:none}}</style></head>
+    <body><div class="hd"><b>${COMPANY}</b><span class="meta">Ngày ${new Date().toLocaleDateString('vi-VN')}</span></div>
+    <pre>${esc(text)}</pre>
+    <div class="noprint" style="margin-top:30px;text-align:center">
+      <button onclick="window.print()" style="padding:9px 18px;font:14px sans-serif;cursor:pointer">In / Lưu thành PDF</button></div>
+    </body></html>`);
+  w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch (e) { /* người dùng tự bấm nút */ } }, 500);
+}
+
+/* --- soạn & gửi email --- */
+async function probeResend() {
+  if (state.resend !== null) return state.resend;
+  try {
+    const { data } = await sb.functions.invoke('send-email', { body: { probe: true } });
+    state.resend = data?.configured ? data : false;
+  } catch { state.resend = false; }
+  return state.resend;
+}
+function composeEmail({ candidate, offer, employee, templateKey } = {}) {
+  const base = offer || candidate || employee || {};
+  const job = state.jobs.find(j => j.id === (offer?.job_id ?? candidate?.job_id));
+  const vars = offer ? offerVars(offer) : {
+    cong_ty: COMPANY, ung_vien: base.full_name || base.candidate_name || '',
+    vi_tri: job?.title || base.current_title || base.title || '', phong_ban: job?.department || base.department || '',
+    phong_ban_clause: (job?.department || base.department) ? `, phòng ${job?.department || base.department}` : '',
+    noi_lam_viec: job?.location || '', quan_ly: job?.hiring_manager || '', nguoi_ky: state.me.split('@')[0],
+    chuc_vu_nguoi_ky: '', luong: '', ngay_bat_dau: '', thu_viec: 2, luong_thu_viec: 85,
+    thoi_gian_lam_viec: 'Thứ 2 - Thứ 6, 8h30 - 17h30', phu_cap: '', han_phan_hoi: '', thoi_gian_phong_van: '', ket_qua_thu_viec: ''
+  };
+  const key = templateKey || (candidate ? 'interview_invite' : 'offer_letter');
+  const to = offer?.candidate_email || candidate?.email || employee?.email || '';
+  const draw = (k) => {
+    const t = state.templates.find(x => x.key === k) || { subject: '', body: '' };
+    return { subject: renderTpl(t.subject, vars).out, body: renderTpl(t.body, vars).out, missing: renderTpl(t.body, vars).missing };
+  };
+  const first = draw(key);
+  openModal('Soạn email', `
+    <div class="field"><label>Mẫu thư</label><select id="emTpl">${state.templates.map(t => `<option value="${t.key}" ${t.key === key ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
+    <div class="row2">
+      <div class="field"><label>Gửi tới *</label><input id="emTo" value="${esc(to)}" placeholder="email@..."></div>
+      <div class="field"><label>CC</label><input id="emCc" placeholder="không bắt buộc"></div>
+    </div>
+    <div class="field"><label>Tiêu đề</label><input id="emSub" value="${esc(first.subject)}"></div>
+    <div class="field"><label>Nội dung</label><textarea id="emBody" rows="14">${esc(first.body)}</textarea></div>
+    <div id="emWarn" class="meta"></div>
+    <div class="actions">
+      <button class="btn" id="emCancel">Đóng</button>
+      <button class="btn" id="emGmail">Mở trong Gmail</button>
+      <button class="btn primary hide" id="emSend">Gửi ngay</button>
+    </div>
+    <div class="meta" style="margin-top:8px">Gmail mở sẵn thư đã điền; bấm Gửi trong Gmail là xong. Thư sẽ nằm trong hộp Sent của bạn.</div>`);
+  const refresh = () => {
+    const k = $('emTpl').value, dft = draw(k);
+    $('emSub').value = dft.subject; $('emBody').value = dft.body;
+    $('emWarn').textContent = dft.missing.length ? 'Thiếu dữ liệu: ' + dft.missing.join(', ') + ' (hiện dấu "…", sửa tay trước khi gửi)' : '';
+  };
+  $('emWarn').textContent = first.missing.length ? 'Thiếu dữ liệu: ' + first.missing.join(', ') + ' (hiện dấu "…", sửa tay trước khi gửi)' : '';
+  $('emTpl').onchange = refresh;
+  $('emCancel').onclick = closeAll;
+  const logRow = (channel, status, error) => ({
+    candidate_id: candidate?.id || offer?.candidate_id || null,
+    employee_id: employee?.id || null, offer_id: offer?.id || null, template_key: $('emTpl').value,
+    to_email: $('emTo').value.trim(), cc_email: $('emCc').value.trim() || null,
+    subject: $('emSub').value.trim(), body: $('emBody').value, channel, status, error: error || null
+  });
+  const validate = () => {
+    const to = $('emTo').value.trim();
+    if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(to)) { toast('Email người nhận chưa hợp lệ'); return false; }
+    if (!$('emSub').value.trim()) { toast('Chưa có tiêu đề'); return false; }
+    return true;
+  };
+  $('emGmail').onclick = async () => {
+    if (!validate()) return;
+    const u = new URL('https://mail.google.com/mail/');
+    u.searchParams.set('view', 'cm'); u.searchParams.set('fs', '1');
+    if (state.me) u.searchParams.set('authuser', state.me);
+    u.searchParams.set('to', $('emTo').value.trim());
+    if ($('emCc').value.trim()) u.searchParams.set('cc', $('emCc').value.trim());
+    u.searchParams.set('su', $('emSub').value.trim());
+    u.searchParams.set('body', $('emBody').value);
+    window.open(u.toString(), '_blank');
+    const { error } = await sb.from('email_log').insert(logRow('gmail', 'opened_in_gmail'));
+    if (error) toast('Mở Gmail OK nhưng ghi log lỗi: ' + error.message, 6000);
+    if (offer && offer.status === 'draft') await sb.from('offers').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', offer.id);
+    closeAll(); await loadAll(); render(); toast('Đã mở Gmail và ghi vào lịch sử');
+  };
+  probeResend().then(cfg => {
+    if (!cfg) return;
+    $('emSend').classList.remove('hide');
+    $('emSend').textContent = 'Gửi ngay (' + cfg.from + ')';
+    $('emSend').onclick = async () => {
+      if (!validate()) return;
+      $('emSend').disabled = true;
+      const { data, error } = await sb.functions.invoke('send-email', {
+        body: { to: $('emTo').value.trim(), cc: $('emCc').value.trim(), subject: $('emSub').value.trim(), text: $('emBody').value }
+      });
+      const ok = !error && data?.sent;
+      await sb.from('email_log').insert(logRow('resend', ok ? 'sent' : 'failed', ok ? null : (data?.error || error?.message || 'lỗi không rõ')));
+      if (!ok) { $('emSend').disabled = false; return toast('Gửi lỗi: ' + (data?.error || error?.message), 7000); }
+      if (offer && offer.status === 'draft') await sb.from('offers').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', offer.id);
+      closeAll(); await loadAll(); render(); toast('Đã gửi email tới ' + $('emTo')?.value);
+    };
+  });
+}
+
+/* --- tab Thư & Email --- */
+function viewMail() {
+  $('toolbar').innerHTML = `${searchBox('Tìm theo tên ứng viên, email...')}<span class="spacer"></span>
+    <button class="btn" id="btnTplEdit">Mẫu thư</button>
+    <button class="btn primary" id="btnNewOffer">+ Offer</button>`;
+  wireSearch();
+  $('btnNewOffer').onclick = () => offerForm(null, null);
+  $('btnTplEdit').onclick = templateList;
+  const offers = state.offers.filter(o => hit(o, ['candidate_name', 'position_title', 'candidate_email']));
+  const mails = state.emails.filter(m => hit(m, ['to_email', 'subject']));
+  $('view').innerHTML = `
+    <h2 class="sec">Offer letter (${offers.length})</h2>
+    ${offers.length ? `<table class="grid"><thead><tr><th>Ứng viên</th><th>Vị trí</th><th>Lương</th><th>Bắt đầu</th><th>Hạn phản hồi</th><th>Trạng thái</th></tr></thead>
+      <tbody>${offers.map(o => `<tr data-offer="${o.id}">
+        <td><b>${esc(o.candidate_name)}</b><div class="meta">${esc(o.candidate_email)}</div></td>
+        <td>${esc(o.position_title)}</td><td>${money(o.salary_gross)}</td>
+        <td>${d(o.start_date)}</td>
+        <td>${o.expires_on ? `<span class="tag ${dayDiff(o.expires_on) < 0 && o.status === 'sent' ? 'warn' : ''}">${d(o.expires_on)}</span>` : ''}</td>
+        <td>${esc(OFFER_STATUS[o.status])}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Chưa có offer nào. Mở hồ sơ ứng viên → "Tạo offer", hoặc bấm "+ Offer".</div>'}
+    <h2 class="sec" style="margin-top:22px">Lịch sử email (${mails.length})</h2>
+    ${mails.length ? `<table class="grid"><thead><tr><th>Thời gian</th><th>Người nhận</th><th>Tiêu đề</th><th>Kênh</th><th>Trạng thái</th></tr></thead>
+      <tbody>${mails.map(m => `<tr data-mail="${m.id}"><td>${new Date(m.created_at).toLocaleString('vi-VN')}</td>
+        <td>${esc(m.to_email)}</td><td>${esc(m.subject)}</td><td>${esc(m.channel)}</td>
+        <td>${esc({ draft: 'Nháp', opened_in_gmail: 'Đã mở Gmail', sent: 'Đã gửi', failed: 'Lỗi' }[m.status])}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Chưa gửi email nào từ app.</div>'}`;
+  document.querySelectorAll('[data-offer]').forEach(tr => tr.onclick = () => openOffer(tr.dataset.offer));
+  document.querySelectorAll('[data-mail]').forEach(tr => tr.onclick = () => {
+    const m = state.emails.find(x => x.id === tr.dataset.mail);
+    openModal('Email đã soạn', `<div class="meta">${new Date(m.created_at).toLocaleString('vi-VN')} · ${esc(m.to_email)}</div>
+      <h4>${esc(m.subject)}</h4><div class="panel" style="white-space:pre-wrap">${esc(m.body)}</div>
+      <div class="actions"><button class="btn" onclick="document.getElementById('scrim').click()">Đóng</button></div>`);
+  });
+}
+function templateList() {
+  openModal('Mẫu thư', state.templates.map(t => `
+    <div class="panel" style="margin-bottom:10px"><h4>${esc(t.name)}</h4>
+      <div class="meta">Tiêu đề: ${esc(t.subject)}</div>
+      <div class="actions"><button class="btn sm" data-tpl="${t.id}">Sửa</button></div></div>`).join('')
+    + `<div class="meta">Biến dùng được: ${TPL_VARS.map(v => '{{' + v + '}}').join(', ')}</div>
+       <div class="actions"><button class="btn" id="tlClose">Đóng</button></div>`);
+  $('tlClose').onclick = closeAll;
+  document.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => {
+    const t = state.templates.find(x => x.id === b.dataset.tpl);
+    const spec = [{ k: 'name', label: 'Tên mẫu' }, { k: 'subject', label: 'Tiêu đề', wide: true },
+      { k: 'body', label: 'Nội dung', type: 'textarea', rows: 16, wide: true }];
+    formModal('Sửa mẫu — ' + t.name, spec, t, async (o) => {
+      if (await upsert('email_templates', o, t.id)) { closeAll(); toast('Đã lưu mẫu'); }
+    });
+  });
+}
+window.__hdrcMail = { renderTpl, offerVars, TPL_VARS };
+
 /* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (_e, session) => { await boot(session); });
 async function boot(session) {
@@ -1103,6 +1387,7 @@ async function boot(session) {
   if (!session) { $('login').classList.remove('hide'); $('app').classList.add('hide'); return; }
   $('login').classList.add('hide'); $('app').classList.remove('hide');
   $('who').textContent = session.user.email;
+  state.me = session.user.email;
   if (await loadAll()) render();
 }
 boot();
