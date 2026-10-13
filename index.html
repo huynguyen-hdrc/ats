@@ -910,7 +910,11 @@ const SHEETS = {
 const normH = (h) => String(h ?? '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[*:]/g, '').replace(/\s+/g, ' ').trim();
 function xlDate(v) {
   if (v == null || v === '') return null;
-  if (v instanceof Date) return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  // dùng toString thay vì instanceof: ô ngày từ file Excel có thể thuộc realm khác (iframe)
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v.getTime())) return undefined;
+    return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
   if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10);
   const s = String(v).trim();
   let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
@@ -921,8 +925,13 @@ function xlDate(v) {
 }
 function xlNum(v) {
   if (v == null || v === '') return null;
-  if (typeof v === 'number') return v;
-  const n = Number(String(v).replace(/[^\d.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(/,(?=\d{3}\b)/g, '').replace(',', '.'));
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  const raw = String(v).trim();
+  if (!/\d/.test(raw)) return undefined;                       // "abc" không được thành 0
+  let t = raw.replace(/\b(vnd|vnđ|đ)\b/gi, '').replace(/[₫$]/g, '').trim();
+  if (/[A-Za-zÀ-ỹ]/.test(t)) return undefined;                  // "15 triệu" phải báo lỗi, không đoán bừa
+  t = t.replace(/\s/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(/,(?=\d{3}\b)/g, '').replace(',', '.');
+  const n = Number(t);
   return Number.isFinite(n) ? n : undefined;
 }
 const xlBool = (v) => v == null || v === '' ? undefined : /^(có|co|x|yes|true|1|đang tuyển)$/i.test(String(v).trim());
