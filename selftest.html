@@ -881,6 +881,18 @@ async function runAll() {
   log(fails.length ? `KẾT LUẬN: ${fails.length} hạng mục LỖI — ${fails.map(f => f.name).join(' | ')}`
                    : 'KẾT LUẬN: toàn bộ hạng mục đạt.');
   frame.src = 'about:blank';
+
+  // lưu kết quả vào database để xem lại / đối chiếu giữa các lần chạy
+  const warns = results.filter(r => r.state === 'warn');
+  const { error: logErr } = await sb.from('selftest_runs').insert({
+    run_by: session.user.email,
+    passed: results.filter(r => r.state === 'pass').length,
+    failed: fails.length,
+    warned: warns.length,
+    duration_s: Number(((Date.now() - t0) / 1000).toFixed(1)),
+    results: results.map(r => ({ g: r.group, n: r.name, s: r.state, d: String(r.detail || '').slice(0, 400) }))
+  });
+  log(logErr ? 'Không lưu được kết quả: ' + logErr.message : 'Đã lưu kết quả lần chạy này vào hệ thống.');
 }
 $('run').onclick = async () => { $('run').disabled = true; try { await runAll(); } catch (e) { log('Lỗi bộ kiểm thử: ' + e.message); } $('run').disabled = false; };
 sb.auth.getSession().then(({ data }) => { if (data.session) $('who').textContent = data.session.user.email; });
