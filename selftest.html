@@ -349,11 +349,11 @@ async function runAll() {
     assert(n >= 7, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
     return 'đăng nhập + render OK';
   });
-  const tabs = ['Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding', 'Hợp đồng', 'Thử việc'];
-  await t('Đủ 7 tab chức năng', async () => {
+  const tabs = ['Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding', 'Hợp đồng', 'Thử việc', 'Thư & Email'];
+  await t('Đủ 8 tab chức năng', async () => {
     const w = frame.contentWindow;
     const names = [...w.document.querySelectorAll('nav button')].map(b => b.textContent.trim());
-    assert(names.length === 7, 'có ' + names.length + ' tab: ' + names.join(', '));
+    assert(names.length === tabs.length, 'có ' + names.length + ' tab: ' + names.join(', '));
     for (const n of tabs) assert(names.includes(n), 'thiếu tab ' + n);
     return names.join(' · ');
   });
@@ -558,9 +558,21 @@ async function runAll() {
     return 'đã cấu hình, gửi từ ' + data.from;
   });
   await t('Email người nhận sai định dạng bị từ chối', async () => {
-    const { data } = await sb.functions.invoke('send-email', { body: { to: 'khong-phai-email', subject: 'x', text: 'y'.repeat(20) } });
-    assert(data && data.error, 'không báo lỗi: ' + JSON.stringify(data));
-    return data.error;
+    const r = await fetch(`${URL_}/functions/v1/send-email`, { method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: KEY, authorization: 'Bearer ' + token },
+      body: JSON.stringify({ to: 'khong-phai-email', subject: 'x', text: 'y'.repeat(20) }) });
+    const body = await r.json();
+    assert(r.status === 400 && body.error, `HTTP ${r.status} ${JSON.stringify(body)}`);
+    return body.error;
+  });
+  await t('Thiếu tiêu đề hoặc nội dung quá ngắn bị từ chối', async () => {
+    const call = (b) => fetch(`${URL_}/functions/v1/send-email`, { method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: KEY, authorization: 'Bearer ' + token }, body: JSON.stringify(b) })
+      .then(async r => ({ s: r.status, b: await r.json() }));
+    const noSub = await call({ to: 'a@b.com', subject: '', text: 'y'.repeat(20) });
+    const shortBody = await call({ to: 'a@b.com', subject: 'x', text: 'ngan' });
+    assert(noSub.s === 400 && shortBody.s === 400, `${noSub.s} / ${shortBody.s}`);
+    return `${noSub.b.error} · ${shortBody.b.error}`;
   });
   await t('Xoá ứng viên không làm mất offer đã phát hành', async () => {
     const tmpC = await ins('candidates', { full_name: TAG + ' Ung vien tam' });
