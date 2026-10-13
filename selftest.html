@@ -41,7 +41,7 @@ iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
     <div><b id="kFail">–</b><span class="sub">Lỗi</span></div>
     <div><b id="kWarn">–</b><span class="sub">Cảnh báo</span></div>
     <div><b id="kTime">–</b><span class="sub">Thời gian</span></div>
-    <div><b id="kBuild">20261013-1827</b><span class="sub">Phiên bản bộ test</span></div>
+    <div><b id="kBuild">20261013-1836</b><span class="sub">Phiên bản bộ test</span></div>
   </div>
   <table id="out"><thead><tr><th style="width:60px">KQ</th><th>Hạng mục</th><th>Chi tiết</th></tr></thead><tbody></tbody></table>
   <div id="log"></div>
@@ -350,22 +350,25 @@ async function runAll() {
     assert(n >= 9, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
     return 'đăng nhập + render OK';
   });
-  const tabs = ['Tổng quan', 'Tuyển dụng', 'Vị trí & JD', 'Nhân sự mới', 'Hồ sơ nhân sự', 'Sơ đồ tổ chức',
-    'Nghỉ phép', 'Thư & Email', 'Phân quyền'];
+  // nhận diện tab bằng mã (data-v) chứ không bằng nhãn, để bộ test chạy đúng cả khi app đang ở tiếng Anh
+  const tabs = [['dash', 'Tổng quan'], ['pipeline', 'Tuyển dụng'], ['jobs', 'Vị trí & JD'],
+    ['newhire', 'Nhân sự mới'], ['people', 'Hồ sơ nhân sự'], ['org', 'Sơ đồ tổ chức'],
+    ['leave', 'Nghỉ phép'], ['mail', 'Thư & Email'], ['settings', 'Phân quyền']];
   await t('Đủ 9 tab chức năng (tài khoản quản trị)', async () => {
     const w = frame.contentWindow;
-    const names = [...w.document.querySelectorAll('nav button')].map(b => b.textContent.trim().replace(/\s+\d+$/, ''));
-    assert(names.length === tabs.length, 'có ' + names.length + ' tab: ' + names.join(', '));
-    for (const n of tabs) assert(names.includes(n), 'thiếu tab ' + n);
-    return names.join(' · ');
+    const btns = [...w.document.querySelectorAll('nav button')];
+    const keys = btns.map(b => b.dataset.v);
+    assert(keys.length === tabs.length, 'có ' + keys.length + ' tab: ' + keys.join(', '));
+    for (const [k, vi] of tabs) assert(keys.includes(k), `thiếu tab ${vi} (${k})`);
+    return btns.map(b => b.textContent.trim()).join(' · ');
   });
-  for (const name of tabs) {
+  for (const [key, name] of tabs) {
     await t(`Tab "${name}" hiển thị được, không lỗi`, async () => {
       const w = frame.contentWindow;
       const errs = [];
       w.onerror = (m) => errs.push(String(m));
-      const btn = [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim().replace(/\s+\d+$/, '') === name);
-      assert(btn, 'không tìm thấy tab ' + name);
+      const btn = [...w.document.querySelectorAll('nav button')].find(b => b.dataset.v === key);
+      assert(btn, 'không tìm thấy tab ' + name + ' (' + key + ')');
       btn.click();
       await new Promise(r => setTimeout(r, 450));
       const v = w.document.getElementById('view');
@@ -376,14 +379,14 @@ async function runAll() {
   }
   await t('Vị trí vừa tạo hiện đúng trên tab Vị trí & JD', async () => {
     const w = frame.contentWindow;
-    [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === 'Vị trí & JD').click();
+    [...w.document.querySelectorAll('nav button')].find(b => b.dataset.v === 'jobs').click();
     await new Promise(r => setTimeout(r, 400));
     assert(w.document.getElementById('view').textContent.includes(TAG), 'không thấy vị trí kiểm thử');
     return 'khớp dữ liệu DB';
   });
   await t('Kanban hiện đủ 7 cột vòng tuyển dụng', async () => {
     const w = frame.contentWindow;
-    [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === 'Tuyển dụng').click();
+    [...w.document.querySelectorAll('nav button')].find(b => b.dataset.v === 'pipeline').click();
     await new Promise(r => setTimeout(r, 400));
     const cols = w.document.querySelectorAll('.col').length;
     assert(cols === 7, 'có ' + cols + ' cột');
@@ -604,7 +607,7 @@ async function runAll() {
     const { data } = await sb.rpc('policy_report');
     const need = {
       contracts: 'is_hr', employee_private: 'is_hr', employee_documents: 'is_hr',
-      offers: 'my_role', email_log: 'my_role', candidates: 'my_role', leave_requests: 'my_employee_id'
+      offers: 'is_hr', email_log: 'is_hr', candidates: 'my_role', leave_requests: 'my_employee_id'
     };
     for (const [tb, frag] of Object.entries(need)) {
       const pols = data.filter(p => p.tbl === tb);
