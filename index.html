@@ -1417,7 +1417,6 @@ function templateList() {
   });
 }
 window.__hdrcMail = { renderTpl, offerVars, TPL_VARS };
-window.__hdrcHR = { workDays, can, isHR, VIEWS, ROLE_LABEL };
 
 
 /* =================== 10. BẢNG ĐIỀU HÀNH & NHẮC VIỆC =================== */
@@ -1708,6 +1707,8 @@ async function openEmployeeDocs(empId) {
     openEmployeeDocs(empId); toast('Đã xoá');
   });
 }
+
+window.__hdrcHR = { workDays, can, isHR, VIEWS, ROLE_LABEL };
 
 /* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (_e, session) => { await boot(session); });
