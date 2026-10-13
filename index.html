@@ -263,6 +263,7 @@ function render() {
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.v; state.q = ''; render(); });
   ({ pipeline: viewPipeline, jobs: viewJobs, people: viewPeople, org: viewOrg,
      onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation })[state.view]();
+  wireXlsx();
 }
 function searchBox(ph) {
   return `<input type="search" id="tq" placeholder="${esc(ph)}" value="${esc(state.q)}">`;
@@ -304,7 +305,8 @@ function viewPipeline() {
     <label class="check"><input type="checkbox" id="showClosed" ${state.showClosed ? 'checked' : ''}> Hiện ứng viên đã loại / rút</label>
     <span class="spacer"></span>
     <button class="btn" id="btnUpload">Tải CV lên</button>
-    <button class="btn primary" id="btnAddCand">+ Ứng viên</button>`;
+    <button class="btn primary" id="btnAddCand">+ Ứng viên</button>
+    ${xlsxBar('candidates')}`;
   wireSearch();
   $('jobFilter').onchange = e => { state.job = e.target.value; render(); };
   $('showClosed').onchange = e => { state.showClosed = e.target.checked; render(); };
@@ -475,7 +477,7 @@ const toJob = (o) => ({ ...o, is_open: o.is_open === 'true', headcount: o.headco
 
 function viewJobs() {
   $('toolbar').innerHTML = `${searchBox('Tìm vị trí, phòng ban...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddJob">+ Vị trí</button>`;
+    <button class="btn primary" id="btnAddJob">+ Vị trí</button>${xlsxBar('jobs')}`;
   wireSearch();
   $('btnAddJob').onclick = () => formModal('Thêm vị trí', JOB_SPEC, { is_open: 'true', headcount: 1 },
     async o => { if (!o.title) return toast('Cần nhập tên vị trí'); if (await upsert('jobs', toJob(o))) { closeAll(); toast('Đã thêm vị trí'); } });
@@ -542,7 +544,7 @@ const STATUS_LABEL = { probation: 'Thử việc', active: 'Chính thức', left:
 
 function viewPeople() {
   $('toolbar').innerHTML = `${searchBox('Tìm tên, chức danh, phòng ban, email...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddEmp">+ Nhân sự</button>`;
+    <button class="btn primary" id="btnAddEmp">+ Nhân sự</button>${xlsxBar('employees')}`;
   wireSearch();
   $('btnAddEmp').onclick = () => formModal('Thêm nhân sự', EMP_SPEC(), { status: 'probation', start_date: today() },
     async o => { if (!o.full_name) return toast('Cần nhập họ tên'); if (await upsert('employees', o)) { closeAll(); toast('Đã thêm nhân sự'); } });
@@ -580,7 +582,7 @@ function openEmployee(id) {
 
 /* =================== 4. SƠ ĐỒ TỔ CHỨC =================== */
 function viewOrg() {
-  $('toolbar').innerHTML = `<span class="meta">Sơ đồ dựng tự động từ cột "Quản lý trực tiếp" trong Danh bạ nhân sự.</span>`;
+  $('toolbar').innerHTML = `<span class="meta">Sơ đồ dựng tự động từ cột "Quản lý trực tiếp" trong Danh bạ nhân sự.</span>${xlsxBar('employees')}`;
   const active = state.employees.filter(e => e.status !== 'left');
   const kids = (pid) => active.filter(e => (e.manager_id || null) === pid);
   const seen = new Set();
@@ -601,7 +603,7 @@ function viewOrg() {
 /* =================== 5. ONBOARDING =================== */
 function viewOnboarding() {
   $('toolbar').innerHTML = `${searchBox('Tìm nhân sự...')}<span class="spacer"></span>
-    <button class="btn" id="btnTpl">Mẫu checklist</button>`;
+    <button class="btn" id="btnTpl">Mẫu checklist</button>${xlsxBar('onboarding')}`;
   wireSearch();
   $('btnTpl').onclick = showTemplates;
   const rows = state.employees.filter(e => e.status !== 'left' && hit(e, ['full_name', 'title', 'department']));
@@ -684,7 +686,7 @@ const CON_SPEC = () => [
 ];
 function viewContracts() {
   $('toolbar').innerHTML = `${searchBox('Tìm theo nhân sự, số HĐ...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddCon">+ Hợp đồng</button>`;
+    <button class="btn primary" id="btnAddCon">+ Hợp đồng</button>${xlsxBar('contracts')}`;
   wireSearch();
   $('btnAddCon').onclick = () => formModal('Thêm hợp đồng', CON_SPEC(), { type: 'thu_viec', status: 'active', start_date: today() },
     async o => { if (!o.employee_id) return toast('Chọn nhân sự'); if (await upsert('contracts', o)) { closeAll(); toast('Đã thêm hợp đồng'); } });
@@ -732,7 +734,7 @@ const CRITERIA = [
 const RESULT_LABEL = { pass: 'Đạt — ký chính thức', extend: 'Gia hạn thử việc', fail: 'Không đạt' };
 function viewProbation() {
   $('toolbar').innerHTML = `${searchBox('Tìm nhân sự...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddRev">+ Đánh giá</button>`;
+    <button class="btn primary" id="btnAddRev">+ Đánh giá</button>${xlsxBar('probation')}`;
   wireSearch();
   $('btnAddRev').onclick = () => openReviewForm(null);
   const probs = state.employees.filter(e => e.status === 'probation' && hit(e, ['full_name', 'title', 'department']));
@@ -790,6 +792,300 @@ function openReviewForm(id, empId) {
     $('rDel').onclick = () => removeRow('probation_reviews', id, 'đánh giá này');
   }
 }
+
+
+/* =================== 8. EXCEL: XUẤT / NHẬP / TẢI MẪU =================== */
+let _xlsx = null;
+function loadXLSX() {
+  if (!_xlsx) _xlsx = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    sc.onload = () => res(window.XLSX);
+    sc.onerror = () => { _xlsx = null; rej(new Error('Không tải được thư viện Excel (kiểm tra mạng)')); };
+    document.head.appendChild(sc);
+  });
+  return _xlsx;
+}
+const EMP_TYPES = ['Full-time', 'Part-time', 'Thực tập', 'Thời vụ'];
+const SHEETS = {
+  employees: {
+    label: 'Danh bạ nhân sự', table: 'employees', file: 'danh-ba-nhan-su', importable: true, keyField: 'email',
+    rows: () => state.employees,
+    cols: [
+      { h: 'Họ tên *', k: 'full_name', req: true },
+      { h: 'Mã nhân viên', k: 'employee_code' },
+      { h: 'Chức danh', k: 'title' },
+      { h: 'Phòng ban', k: 'department' },
+      { h: 'Email', k: 'email' },
+      { h: 'Điện thoại', k: 'phone', text: true },
+      { h: 'Quản lý trực tiếp (họ tên)', k: 'manager_id', lookup: 'employee' },
+      { h: 'Ngày vào làm (yyyy-mm-dd)', k: 'start_date', date: true },
+      { h: 'Loại hình', k: 'employment_type', enum: EMP_TYPES },
+      { h: 'Trạng thái', k: 'status', map: { 'Thử việc': 'probation', 'Chính thức': 'active', 'Đã nghỉ': 'left' }, def: 'probation' },
+      { h: 'Nơi làm việc', k: 'location' },
+      { h: 'Ghi chú', k: 'note' }
+    ],
+    sample: ['Nguyễn Văn A', 'NV001', 'Content Executive', 'Marketing', 'a.nguyen@helidirect.com', '0901234567', '', '2026-10-01', 'Full-time', 'Thử việc', 'HCM', '']
+  },
+  candidates: {
+    label: 'Ứng viên', table: 'candidates', file: 'ung-vien', importable: true, keyField: 'email',
+    rows: () => state.candidates,
+    cols: [
+      { h: 'Họ tên *', k: 'full_name', req: true },
+      { h: 'Email', k: 'email' },
+      { h: 'Điện thoại', k: 'phone', text: true },
+      { h: 'Chức danh hiện tại', k: 'current_title' },
+      { h: 'Công ty hiện tại', k: 'current_company' },
+      { h: 'Số năm kinh nghiệm', k: 'years_experience', num: true },
+      { h: 'Vị trí ứng tuyển (tên)', k: 'job_id', lookup: 'job' },
+      { h: 'Vòng', k: 'stage', stage: true, def: 'new' },
+      { h: 'Nguồn', k: 'source' },
+      { h: 'Kỹ năng (phẩy)', k: 'skills', list: true }
+    ],
+    sample: ['Trần Thị B', 'b.tran@gmail.com', '0912345678', 'Data Analyst', 'ACB', '2.8', 'Data Analyst', 'New', 'TopCV', 'SQL, Excel, Power BI']
+  },
+  jobs: {
+    label: 'Vị trí tuyển dụng', table: 'jobs', file: 'vi-tri-tuyen-dung', importable: true, keyField: 'title',
+    rows: () => state.jobs,
+    cols: [
+      { h: 'Tên vị trí *', k: 'title', req: true },
+      { h: 'Phòng ban', k: 'department' },
+      { h: 'Số lượng', k: 'headcount', num: true, def: 1 },
+      { h: 'Nơi làm việc', k: 'location' },
+      { h: 'Loại hình', k: 'employment_type', enum: EMP_TYPES },
+      { h: 'Quản lý tuyển dụng', k: 'hiring_manager' },
+      { h: 'Dải lương', k: 'salary_range' },
+      { h: 'Hạn tuyển xong (yyyy-mm-dd)', k: 'target_date', date: true },
+      { h: 'Đang tuyển (Có/Không)', k: 'is_open', bool: true, def: true },
+      { h: 'Mô tả chung', k: 'jd_summary' },
+      { h: 'Trách nhiệm chính', k: 'jd_responsibilities' },
+      { h: 'Yêu cầu', k: 'jd_requirements' },
+      { h: 'Quyền lợi', k: 'jd_benefits' }
+    ],
+    sample: ['Content Executive', 'Marketing', '2', 'HCM', 'Full-time', 'Huy Nguyen', '15-20tr', '2026-12-31', 'Có', 'Viết nội dung social', 'Thành thạo tiếng Việt', '13 tháng lương']
+  },
+  contracts: {
+    label: 'Hợp đồng', table: 'contracts', file: 'hop-dong', importable: true,
+    rows: () => state.contracts,
+    cols: [
+      { h: 'Nhân sự (họ tên) *', k: 'employee_id', req: true, lookup: 'employee' },
+      { h: 'Số hợp đồng', k: 'contract_no' },
+      { h: 'Loại hợp đồng', k: 'type', map: { 'Thử việc': 'thu_viec', 'Xác định 12 tháng': 'xd_12', 'Xác định 24 tháng': 'xd_24', 'Không xác định thời hạn': 'khong_xd', 'Thời vụ / dịch vụ': 'thoi_vu' }, def: 'thu_viec' },
+      { h: 'Trạng thái', k: 'status', map: { 'Nháp': 'draft', 'Hiệu lực': 'active', 'Hết hạn': 'expired', 'Đã chấm dứt': 'terminated' }, def: 'active' },
+      { h: 'Ngày ký (yyyy-mm-dd)', k: 'signed_date', date: true },
+      { h: 'Hiệu lực từ (yyyy-mm-dd)', k: 'start_date', date: true },
+      { h: 'Hết hạn (yyyy-mm-dd)', k: 'end_date', date: true },
+      { h: 'Lương cơ bản', k: 'base_salary', num: true },
+      { h: 'Ghi chú', k: 'note' }
+    ],
+    sample: ['Nguyễn Văn A', 'HD-2026-001', 'Thử việc', 'Hiệu lực', '2026-10-01', '2026-10-01', '2026-12-01', '15000000', '']
+  },
+  onboarding: {
+    label: 'Onboarding', file: 'onboarding', importable: false,
+    rows: () => state.obItems,
+    cols: [
+      { h: 'Nhân sự', k: 'employee_id', lookup: 'employee' },
+      { h: 'Việc cần làm', k: 'title' },
+      { h: 'Phụ trách', k: 'owner_role' },
+      { h: 'Hạn', k: 'due_date', date: true },
+      { h: 'Đã xong (Có/Không)', k: 'done', bool: true }
+    ]
+  },
+  probation: {
+    label: 'Đánh giá thử việc', file: 'danh-gia-thu-viec', importable: false,
+    rows: () => state.reviews,
+    cols: [
+      { h: 'Nhân sự', k: 'employee_id', lookup: 'employee' },
+      { h: 'Ngày đánh giá', k: 'review_date', date: true },
+      { h: 'Người đánh giá', k: 'reviewer' },
+      { h: 'Điểm trung bình', k: 'total', num: true },
+      { h: 'Kết luận', k: 'result', map: { 'Đạt — ký chính thức': 'pass', 'Gia hạn thử việc': 'extend', 'Không đạt': 'fail' } },
+      { h: 'Điểm mạnh', k: 'strengths' },
+      { h: 'Cần cải thiện', k: 'improvements' }
+    ]
+  }
+};
+
+/* --- chuyển đổi giá trị --- */
+const normH = (h) => String(h ?? '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[*:]/g, '').replace(/\s+/g, ' ').trim();
+function xlDate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  return undefined;
+}
+function xlNum(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v;
+  const n = Number(String(v).replace(/[^\d.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(/,(?=\d{3}\b)/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : undefined;
+}
+const xlBool = (v) => v == null || v === '' ? undefined : /^(có|co|x|yes|true|1|đang tuyển)$/i.test(String(v).trim());
+function cellOut(col, row) {
+  const v = row[col.k];
+  if (col.lookup === 'employee') return empName(v);
+  if (col.lookup === 'job') return jobName(v);
+  if (col.list) return (v || []).join(', ');
+  if (col.bool) return v ? 'Có' : 'Không';
+  if (col.stage) return state.stages.find(s => s.key === v)?.label || v || '';
+  if (col.map) return Object.keys(col.map).find(k => col.map[k] === v) || '';
+  return v ?? '';
+}
+function cellIn(col, raw, rowErrors) {
+  const v = typeof raw === 'string' ? raw.trim() : raw;
+  const empty = v == null || v === '';
+  if (empty) {
+    if (col.req) { rowErrors.push(`thiếu "${col.h}"`); return undefined; }
+    return col.def !== undefined ? col.def : null;
+  }
+  if (col.lookup === 'employee') {
+    const e = state.employees.find(x => x.full_name.toLowerCase() === String(v).toLowerCase());
+    if (!e) { rowErrors.push(`không tìm thấy nhân sự "${v}"`); return undefined; }
+    return e.id;
+  }
+  if (col.lookup === 'job') {
+    const j = state.jobs.find(x => x.title.toLowerCase() === String(v).toLowerCase());
+    if (!j) { rowErrors.push(`không tìm thấy vị trí "${v}"`); return undefined; }
+    return j.id;
+  }
+  if (col.stage) {
+    const st = state.stages.find(s => s.key === String(v).toLowerCase() || s.label.toLowerCase() === String(v).toLowerCase());
+    if (!st) { rowErrors.push(`vòng "${v}" không hợp lệ`); return undefined; }
+    return st.key;
+  }
+  if (col.map) {
+    const codes = Object.values(col.map);
+    if (codes.includes(String(v))) return String(v);
+    const hit = Object.keys(col.map).find(k => k.toLowerCase() === String(v).toLowerCase());
+    if (!hit) { rowErrors.push(`"${col.h}" chỉ nhận: ${Object.keys(col.map).join(' / ')}`); return undefined; }
+    return col.map[hit];
+  }
+  if (col.enum) {
+    const hit = col.enum.find(x => x.toLowerCase() === String(v).toLowerCase());
+    if (!hit) { rowErrors.push(`"${col.h}" chỉ nhận: ${col.enum.join(' / ')}`); return undefined; }
+    return hit;
+  }
+  if (col.bool) { const b = xlBool(v); return b === undefined ? true : b; }
+  if (col.date) { const d = xlDate(v); if (d === undefined) { rowErrors.push(`ngày "${v}" sai định dạng, cần yyyy-mm-dd`); return undefined; } return d; }
+  if (col.num) { const n = xlNum(v); if (n === undefined) { rowErrors.push(`"${col.h}" phải là số, đang là "${v}"`); return undefined; } return n; }
+  if (col.list) return String(v).split(',').map(x => x.trim()).filter(Boolean);
+  return String(v);
+}
+/* đọc mảng 2 chiều từ Excel → danh sách bản ghi + lỗi theo dòng */
+function parseAoa(entity, aoa) {
+  const cfg = SHEETS[entity], headers = (aoa[0] || []).map(normH);
+  const idx = {};
+  cfg.cols.forEach(c => { const i = headers.indexOf(normH(c.h)); if (i >= 0) idx[c.k] = i; });
+  const missing = cfg.cols.filter(c => c.req && idx[c.k] === undefined).map(c => c.h);
+  const rows = [], errors = [];
+  if (missing.length) return { rows, errors: [{ line: 1, msgs: ['thiếu cột bắt buộc: ' + missing.join(', ')] }], missing };
+  aoa.slice(1).forEach((r, n) => {
+    if (!r || r.every(c => c == null || String(c).trim() === '')) return;
+    const msgs = [], out = {};
+    cfg.cols.forEach(c => {
+      if (idx[c.k] === undefined) { if (c.def !== undefined) out[c.k] = c.def; return; }
+      const v = cellIn(c, r[idx[c.k]], msgs);
+      if (v !== undefined) out[c.k] = v;
+    });
+    if (msgs.length) errors.push({ line: n + 2, msgs });
+    else rows.push(out);
+  });
+  return { rows, errors, missing };
+}
+async function exportSheet(entity) {
+  const XLSX = await loadXLSX();
+  const cfg = SHEETS[entity];
+  const data = cfg.rows().map(r => Object.fromEntries(cfg.cols.map(c => [c.h.replace(' *', ''), cellOut(c, r)])));
+  if (!data.length) return toast('Chưa có dữ liệu để xuất');
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = cfg.cols.map(c => ({ wch: Math.max(14, Math.min(38, c.h.length + 6)) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, cfg.label.slice(0, 28));
+  XLSX.writeFile(wb, `${cfg.file}-${today()}.xlsx`);
+  toast(`Đã xuất ${data.length} dòng`);
+}
+async function templateSheet(entity) {
+  const XLSX = await loadXLSX();
+  const cfg = SHEETS[entity];
+  const ws = XLSX.utils.aoa_to_sheet([cfg.cols.map(c => c.h), cfg.sample || []]);
+  ws['!cols'] = cfg.cols.map(c => ({ wch: Math.max(14, Math.min(38, c.h.length + 6)) }));
+  const guide = [['Hướng dẫn nhập liệu'], ['Cột có dấu * là bắt buộc.'], ['Ngày ghi dạng yyyy-mm-dd hoặc dd/mm/yyyy.'],
+    ['Dòng mẫu ở sheet đầu chỉ để tham khảo — xoá đi trước khi nhập.'], ['Giá trị cho phép:'], []];
+  cfg.cols.forEach(c => {
+    if (c.map) guide.push([c.h, Object.keys(c.map).join(' / ')]);
+    else if (c.enum) guide.push([c.h, c.enum.join(' / ')]);
+    else if (c.bool) guide.push([c.h, 'Có / Không']);
+    else if (c.stage) guide.push([c.h, state.stages.map(s => s.label).join(' / ')]);
+    else if (c.lookup) guide.push([c.h, 'phải trùng tên đã có trong app']);
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Nhap lieu');
+  const gs = XLSX.utils.aoa_to_sheet(guide); gs['!cols'] = [{ wch: 34 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, gs, 'Huong dan');
+  XLSX.writeFile(wb, `mau-${cfg.file}.xlsx`);
+  toast('Đã tải file mẫu');
+}
+function pickImport(entity) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
+  inp.onchange = async () => { if (inp.files[0]) await previewImport(entity, inp.files[0]); };
+  inp.click();
+}
+async function previewImport(entity, file) {
+  const cfg = SHEETS[entity];
+  let parsed;
+  try {
+    const XLSX = await loadXLSX();
+    const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+    parsed = parseAoa(entity, aoa);
+  } catch (e) { return toast('Không đọc được file: ' + e.message, 6000); }
+  const { rows, errors } = parsed;
+  const key = cfg.keyField;
+  const existing = key ? (cfg.rows() || []) : [];
+  const dup = key ? rows.filter(r => r[key] && existing.some(e => String(e[key] || '').toLowerCase() === String(r[key]).toLowerCase())) : [];
+  openModal(`Nhập Excel — ${cfg.label}`, `
+    <p><b>${rows.length}</b> dòng hợp lệ · <b style="color:var(--danger)">${errors.length}</b> dòng lỗi${dup.length ? ` · <b>${dup.length}</b> dòng trùng (${key}) sẽ được cập nhật thay vì tạo mới` : ''}</p>
+    ${errors.length ? `<div class="panel" style="max-height:200px;overflow:auto;margin-bottom:12px">
+      ${errors.slice(0, 50).map(e => `<div class="meta">Dòng ${e.line}: ${esc(e.msgs.join('; '))}</div>`).join('')}
+      ${errors.length > 50 ? `<div class="meta">... và ${errors.length - 50} dòng nữa</div>` : ''}</div>` : ''}
+    ${rows.length ? `<table class="grid"><thead><tr>${cfg.cols.slice(0, 5).map(c => `<th>${esc(c.h.replace(' *', ''))}</th>`).join('')}</tr></thead>
+      <tbody>${rows.slice(0, 5).map(r => `<tr>${cfg.cols.slice(0, 5).map(c => `<td>${esc(String(cellOut(c, r) ?? ''))}</td>`).join('')}</tr>`).join('')}</tbody></table>
+      <div class="meta" style="margin-top:6px">Xem trước 5 dòng đầu.</div>` : ''}
+    <div class="actions"><button class="btn" id="imCancel">Huỷ</button>
+      <button class="btn primary" id="imGo" ${rows.length ? '' : 'disabled'}>Nhập ${rows.length} dòng</button></div>`);
+  $('imCancel').onclick = closeAll;
+  $('imGo').onclick = async () => {
+    $('imGo').disabled = true;
+    let ins = 0, upd = 0;
+    for (const r of rows) {
+      const match = key && r[key] ? existing.find(e => String(e[key] || '').toLowerCase() === String(r[key]).toLowerCase()) : null;
+      const res = match ? await sb.from(cfg.table).update(r).eq('id', match.id) : await sb.from(cfg.table).insert(r);
+      if (res.error) { toast(`Lỗi ở dòng "${r.full_name || r.title || ''}": ${res.error.message}`, 8000); $('imGo').disabled = false; return; }
+      match ? upd++ : ins++;
+    }
+    closeAll(); await loadAll(); render();
+    toast(`Đã nhập: ${ins} dòng mới${upd ? `, cập nhật ${upd} dòng` : ''}`);
+  };
+}
+function xlsxBar(entity) {
+  const cfg = SHEETS[entity];
+  return `<span class="spacer"></span>
+    <button class="btn sm" data-xl-tpl="${entity}" ${cfg.importable ? '' : 'style="display:none"'}>Tải mẫu Excel</button>
+    <button class="btn sm" data-xl-imp="${entity}" ${cfg.importable ? '' : 'style="display:none"'}>Nhập Excel</button>
+    <button class="btn sm" data-xl-exp="${entity}">Xuất Excel</button>`;
+}
+function wireXlsx() {
+  document.querySelectorAll('[data-xl-tpl]').forEach(b => b.onclick = () => templateSheet(b.dataset.xlTpl).catch(e => toast(e.message, 6000)));
+  document.querySelectorAll('[data-xl-imp]').forEach(b => b.onclick = () => pickImport(b.dataset.xlImp));
+  document.querySelectorAll('[data-xl-exp]').forEach(b => b.onclick = () => exportSheet(b.dataset.xlExp).catch(e => toast(e.message, 6000)));
+}
+window.__hdrc = { SHEETS, parseAoa, xlDate, xlNum, cellOut };
 
 /* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (_e, session) => { await boot(session); });

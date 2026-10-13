@@ -388,8 +388,107 @@ async function runAll() {
     return '7 cột';
   });
 
+  /* ---------- F. Excel ---------- */
+  group = 'F. Xuất / nhập Excel';
+  const W = () => frame.contentWindow;
+  await t('Cấu hình cột Excel hợp lệ cho mọi bảng', async () => {
+    const S = W().__hdrc.SHEETS;
+    assert(S, 'app chưa expose cấu hình Excel');
+    for (const [k, c] of Object.entries(S)) {
+      assert(c.cols.length, k + ': không có cột');
+      assert(typeof c.rows === 'function', k + ': thiếu nguồn dữ liệu');
+      if (c.importable) assert(c.table && c.cols.some(x => x.req), k + ': thiếu bảng đích hoặc cột bắt buộc');
+    }
+    return Object.keys(S).length + ' bảng: ' + Object.keys(S).join(', ');
+  });
+  await t('Đọc ngày kiểu Việt Nam và kiểu Excel', async () => {
+    const { xlDate } = W().__hdrc;
+    assert(xlDate('01/11/2026') === '2026-11-01', 'dd/mm/yyyy → ' + xlDate('01/11/2026'));
+    assert(xlDate('2026-11-01') === '2026-11-01', 'yyyy-mm-dd sai');
+    assert(xlDate(new Date(2026, 10, 1)) === '2026-11-01', 'ô ngày Excel sai: ' + xlDate(new Date(2026, 10, 1)));
+    assert(xlDate('linh tinh') === undefined, 'ngày rác phải bị bắt lỗi');
+    assert(xlDate('') === null, 'ô trống phải trả rỗng');
+    return 'dd/mm/yyyy · yyyy-mm-dd · ô ngày Excel · ngày rác';
+  });
+  await t('Đọc số có dấu chấm phân cách nghìn', async () => {
+    const { xlNum } = W().__hdrc;
+    assert(xlNum('15.000.000') === 15000000, '15.000.000 → ' + xlNum('15.000.000'));
+    assert(xlNum('2,8') === 2.8, '2,8 → ' + xlNum('2,8'));
+    assert(xlNum(15000000) === 15000000, 'số thuần sai');
+    assert(xlNum('abc') === undefined, 'chữ phải bị bắt lỗi');
+    return '15.000.000 · 2,8 · chữ → lỗi';
+  });
+  await t('File thiếu cột bắt buộc bị chặn ngay', async () => {
+    const r = W().__hdrc.parseAoa('employees', [['Chức danh', 'Phòng ban'], ['Staff', 'QA']]);
+    assert(!r.rows.length && r.errors.length, 'vẫn nhận dữ liệu');
+    assert(r.errors[0].msgs[0].includes('thiếu cột bắt buộc'), r.errors[0].msgs[0]);
+    return r.errors[0].msgs[0];
+  });
+  await t('Dòng thiếu họ tên bị báo đúng số dòng', async () => {
+    const r = W().__hdrc.parseAoa('employees', [
+      ['Họ tên *', 'Chức danh', 'Trạng thái'],
+      ['Nguyen Van Test', 'Staff', 'Chính thức'],
+      ['', 'Staff', 'Chính thức']]);
+    assert(r.rows.length === 1, 'nhận ' + r.rows.length + ' dòng');
+    assert(r.errors.length === 1 && r.errors[0].line === 3, JSON.stringify(r.errors));
+    assert(r.rows[0].status === 'active', 'trạng thái không dịch sang mã: ' + r.rows[0].status);
+    return 'dòng 3 báo thiếu họ tên, dòng 2 dịch "Chính thức" → active';
+  });
+  await t('Giá trị ngoài danh sách cho phép bị báo lỗi kèm gợi ý', async () => {
+    const r = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Trạng thái'], ['A B', 'Nghỉ chơi']]);
+    assert(r.errors.length === 1, 'không bắt được');
+    assert(r.errors[0].msgs[0].includes('Thử việc'), r.errors[0].msgs[0]);
+    return r.errors[0].msgs[0];
+  });
+  await t('Tên quản lý không có trong app bị chặn', async () => {
+    const r = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Quản lý trực tiếp (họ tên)'], ['A B', 'Nguoi Khong Ton Tai']]);
+    assert(r.errors.length === 1 && r.errors[0].msgs[0].includes('không tìm thấy nhân sự'), JSON.stringify(r.errors));
+    return r.errors[0].msgs[0];
+  });
+  await t('Tên quản lý có thật được đổi đúng sang mã nội bộ', async () => {
+    // mgr là nhân sự [SELFTEST] đã tạo ở nhóm D và vẫn còn
+    await W().__hdrcReload?.();
+    const r = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Quản lý trực tiếp (họ tên)'], ['Nhan vien moi', mgr.full_name]]);
+    assert(!r.errors.length, JSON.stringify(r.errors));
+    assert(r.rows[0].manager_id === mgr.id, 'id = ' + r.rows[0].manager_id);
+    return 'khớp đúng nhân sự quản lý';
+  });
+  await t('Vòng tuyển dụng nhận cả tiếng Việt lẫn mã', async () => {
+    const r = W().__hdrc.parseAoa('candidates', [['Họ tên *', 'Vòng', 'Kỹ năng (phẩy)'], ['Ung vien X', 'Screening', 'SQL, Excel']]);
+    assert(!r.errors.length, JSON.stringify(r.errors));
+    assert(r.rows[0].stage === 'screening', 'vòng = ' + r.rows[0].stage);
+    assert(Array.isArray(r.rows[0].skills) && r.rows[0].skills.length === 2, 'kỹ năng = ' + JSON.stringify(r.rows[0].skills));
+    return 'Screening → screening, kỹ năng tách thành 2';
+  });
+  await t('Xuất ra Excel rồi nhập lại không sai lệch dữ liệu', async () => {
+    const XLSX = await new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      sc.onload = () => res(window.XLSX); sc.onerror = () => rej(new Error('không tải được thư viện Excel'));
+      document.head.appendChild(sc);
+    });
+    const cols = W().__hdrc.SHEETS.employees.cols;
+    const src = { full_name: 'Vong Lap Test', title: 'Staff', department: 'QA', email: 'vl@test.com',
+      phone: '0901234567', manager_id: mgr.id, start_date: '2026-10-01', employment_type: 'Full-time',
+      status: 'active', location: 'HCM', note: 'ghi chú' };
+    const aoaOut = [cols.map(c => c.h), cols.map(c => W().__hdrc.cellOut(c, src))];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaOut), 'S');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const back = XLSX.read(buf, { cellDates: true });
+    const aoaIn = XLSX.utils.sheet_to_json(back.Sheets.S, { header: 1, raw: true, defval: '' });
+    const r = W().__hdrc.parseAoa('employees', aoaIn);
+    assert(!r.errors.length, JSON.stringify(r.errors));
+    const got = r.rows[0];
+    for (const k of ['full_name', 'title', 'department', 'email', 'status', 'manager_id', 'start_date', 'employment_type']) {
+      assert(String(got[k]) === String(src[k]), `${k}: "${got[k]}" ≠ "${src[k]}"`);
+    }
+    assert(String(got.phone) === '0901234567', 'số điện thoại bị đổi: ' + got.phone);
+    return 'ghi file thật → đọc lại → 9 trường khớp nguyên vẹn';
+  });
+
   /* ---------- dọn dẹp ---------- */
-  group = 'F. Dọn dẹp dữ liệu kiểm thử';
+  group = 'G. Dọn dẹp dữ liệu kiểm thử';
   await t('Xoá sạch mọi bản ghi [SELFTEST]', async () => {
     const report = [];
     for (const tb of ['candidates', 'jobs', 'employees']) {
