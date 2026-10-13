@@ -110,7 +110,7 @@ table.grid tbody tr:hover{background:#f9fbfc;cursor:pointer}
 <div id="login" class="hide">
   <h1>HDRC</h1>
   <div class="brandsub" style="margin-bottom:10px">Human Resource Management</div>
-  <p>Đăng nhập bằng email công ty. Hệ thống gửi link đăng nhập 1 lần.</p>
+  <p>Đăng nhập bằng email công ty (@helidirect.com). Hệ thống gửi link đăng nhập dùng 1 lần.</p>
   <form id="loginForm">
     <div class="field"><label>Email</label><input type="email" id="loginEmail" required placeholder="ban@helidirect.com"></div>
     <button class="btn primary" style="width:100%">Gửi link đăng nhập</button>
@@ -225,7 +225,14 @@ $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = $('loginEmail').value.trim();
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split('#')[0] } });
-  $('loginMsg').textContent = error ? 'Lỗi: ' + error.message : 'Đã gửi link tới ' + email + '. Mở mail và bấm vào link.';
+  if (!error) { $('loginMsg').textContent = 'Đã gửi link tới ' + email + '. Mở mail và bấm vào link.'; return; }
+  const m = error.message || '';
+  $('loginMsg').textContent =
+    /Database error saving new user|not allowed|42501/i.test(m)
+      ? 'Email này chưa được phép dùng hệ thống. Chỉ email công ty (@helidirect.com) đăng nhập được — liên hệ phòng Nhân sự nếu cần mở thêm.'
+    : /rate limit|too many|after \d+ second/i.test(m)
+      ? 'Hệ thống chỉ gửi được vài email đăng nhập mỗi giờ. Đợi ít phút rồi thử lại, hoặc nhờ HR gửi lại sau.'
+      : 'Lỗi: ' + m;
 });
 $('btnOut').onclick = async () => { await sb.auth.signOut(); location.reload(); };
 $('btnRefresh').onclick = async () => { await loadAll(); render(); toast('Đã làm mới'); };
