@@ -7,45 +7,50 @@
 <style>
 :root{
   --bg:#f3f5f7; --panel:#fff; --line:#e3e8ee; --text:#17212b; --muted:#6b7a8c;
-  --t1:#d9efe8; --t7:#0f5547; --accent:#0f7a63; --accent-d:#0b5e4c;
-  --danger:#b4443a; --radius:10px;
+  --accent:#0f7a63; --accent-d:#0b5e4c; --danger:#b4443a; --warn:#b5761f; --radius:10px;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Arial,sans-serif}
 button{font:inherit;cursor:pointer}
 input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
 .btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 14px;font-weight:600}
 .btn:hover{background:#f7f9fa}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{background:var(--accent-d)}
 .btn.ghost{border:none;background:transparent;color:var(--muted);padding:6px 8px}
 .btn.danger{color:var(--danger);border-color:#e7cdca}
+.btn.sm{padding:5px 10px;font-size:13px}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .field label{font-size:12px;font-weight:600;color:var(--muted)}
 .field input,.field select,.field textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;width:100%}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.hide{display:none!important}
 
-/* header */
-header{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header{display:flex;align-items:center;gap:12px;padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
 .logo{font-weight:800;letter-spacing:.5px;font-size:18px}
-.brandsub{color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.2px}
-header select,header input[type=search]{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
-header input[type=search]{width:280px}
+.brandsub{color:var(--muted);font-size:12px;font-weight:600}
 .spacer{flex:1}
 .who{font-size:12px;color:var(--muted)}
+nav{display:flex;gap:4px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{border:none;background:none;padding:11px 14px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
+.toolbar{display:flex;gap:8px;align-items:center;padding:14px 20px 0;flex-wrap:wrap}
+.toolbar input[type=search],.toolbar select{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
+.toolbar input[type=search]{width:260px}
 label.check{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+main{padding:14px 20px 48px}
+h2.sec{margin:0 0 12px;font-size:16px}
 
-/* summary */
-.summary{display:flex;gap:6px;padding:14px 20px 0}
+.summary{display:flex;gap:6px;margin-bottom:14px}
 .sum{flex:1;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700}
 .sum b{font-size:16px}
-
-/* board */
-.board{display:flex;gap:14px;padding:14px 20px 40px;overflow-x:auto;align-items:flex-start;min-height:60vh}
+.board{display:flex;gap:14px;overflow-x:auto;align-items:flex-start;min-height:50vh}
 .col{flex:0 0 272px;background:#e8ecf1;border-radius:var(--radius);padding:10px;min-height:120px}
 .col.over{outline:2px dashed var(--accent);outline-offset:-2px;background:#dfeae6}
 .col h3{margin:2px 4px 10px;font-size:13px;display:flex;justify-content:space-between;color:#44566b}
-.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:grab;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:grab}
 .card:hover{border-color:#cfd8e3}
 .card.dragging{opacity:.45}
 .card .nm{font-weight:700;margin-bottom:2px;word-break:break-word}
@@ -53,27 +58,51 @@ label.check{display:flex;align-items:center;gap:6px;color:var(--muted);font-size
 .tags{display:flex;flex-wrap:wrap;gap:5px}
 .tag{background:#eef1f5;border-radius:999px;padding:2px 9px;font-size:11px;color:#44566b;white-space:nowrap}
 .tag.warn{background:#fdecea;color:#9e3b32}
-.empty{color:var(--muted);font-size:13px;padding:4px}
+.tag.ok{background:#e4f3ec;color:#17694f}
+.tag.soon{background:#fdf3e2;color:#8a5a12}
+.empty{color:var(--muted);font-size:13px;padding:10px 4px}
 
-/* drawer + modal */
+table.grid{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+table.grid th,table.grid td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+table.grid th{background:#f7f9fa;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+table.grid tr:last-child td{border-bottom:none}
+table.grid tbody tr:hover{background:#f9fbfc;cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.panel h4{margin:0 0 6px;font-size:15px}
+.meta{color:var(--muted);font-size:12px}
+.bar{height:6px;background:#e8ecf1;border-radius:999px;overflow:hidden;margin:8px 0}
+.bar > i{display:block;height:100%;background:var(--accent)}
+
+.org{display:flex;gap:10px;flex-direction:column}
+.org ul{list-style:none;margin:0;padding-left:22px;border-left:1px solid var(--line)}
+.org > ul{padding-left:0;border-left:none}
+.org li{margin:6px 0}
+.node{display:inline-flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:200px}
+.node b{font-size:13px}
+.node span{color:var(--muted);font-size:12px}
+
 .scrim{position:fixed;inset:0;background:rgba(16,24,40,.42);display:none;z-index:40}
 .scrim.on{display:block}
-.drawer{position:fixed;top:0;right:0;height:100%;width:430px;max-width:94vw;background:#fff;z-index:50;transform:translateX(100%);transition:transform .18s ease;display:flex;flex-direction:column;box-shadow:-8px 0 24px rgba(16,24,40,.12)}
+.drawer{position:fixed;top:0;right:0;height:100%;width:460px;max-width:96vw;background:#fff;z-index:50;transform:translateX(100%);transition:transform .18s ease;display:flex;flex-direction:column;box-shadow:-8px 0 24px rgba(16,24,40,.12)}
 .drawer.on{transform:none}
 .drawer header{border-bottom:1px solid var(--line)}
 .drawer .body{padding:16px 20px;overflow:auto;flex:1}
-.modal{position:fixed;z-index:50;top:50%;left:50%;transform:translate(-50%,-50%);width:560px;max-width:94vw;max-height:88vh;overflow:auto;background:#fff;border-radius:12px;padding:20px;display:none;box-shadow:0 20px 50px rgba(16,24,40,.2)}
+.modal{position:fixed;z-index:50;top:50%;left:50%;transform:translate(-50%,-50%);width:640px;max-width:95vw;max-height:88vh;overflow:auto;background:#fff;border-radius:12px;padding:20px;display:none;box-shadow:0 20px 50px rgba(16,24,40,.2)}
 .modal.on{display:block}
 .modal h2{margin:0 0 14px;font-size:17px}
 .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 .ev{border-left:2px solid var(--line);padding:0 0 12px 12px;margin-left:4px}
 .ev .when{font-size:11px;color:var(--muted)}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#17212b;color:#fff;padding:10px 16px;border-radius:8px;z-index:90;display:none}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#17212b;color:#fff;padding:10px 16px;border-radius:8px;z-index:90;display:none;max-width:90vw}
 .toast.on{display:block}
 #login{max-width:380px;margin:12vh auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:28px}
-#login h1{margin:0 0 4px;font-size:20px}
+#login h1{margin:0 0 2px;font-size:20px}
 #login p{color:var(--muted);margin:0 0 18px}
-.hide{display:none!important}
+.checklist{list-style:none;margin:0;padding:0}
+.checklist li{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}
+.checklist li.done span.t{text-decoration:line-through;color:var(--muted)}
+.checklist input{margin-top:3px}
 </style>
 </head>
 <body>
@@ -91,63 +120,101 @@ label.check{display:flex;align-items:center;gap:6px;color:var(--muted);font-size
 <div id="app" class="hide">
   <header>
     <span class="logo">HDRC</span><span class="brandsub">Human Resource Management</span>
-    <select id="jobFilter"></select>
-    <input type="search" id="search" placeholder="Tìm tên, email, skill, công ty...">
-    <label class="check"><input type="checkbox" id="showClosed"> Hiện ứng viên đã loại / rút</label>
     <span class="spacer"></span>
     <span class="who" id="who"></span>
-    <button class="btn" id="btnJobs">Vị trí</button>
     <button class="btn" id="btnRefresh">Làm mới</button>
-    <button class="btn" id="btnUpload">Tải CV lên</button>
-    <button class="btn primary" id="btnAdd">+ Ứng viên</button>
     <button class="btn ghost" id="btnOut">Thoát</button>
   </header>
-  <div class="summary" id="summary"></div>
-  <div class="board" id="board"></div>
+  <nav id="nav"></nav>
+  <div class="toolbar" id="toolbar"></div>
+  <main id="view"></main>
 </div>
 
 <div class="scrim" id="scrim"></div>
-
 <div class="drawer" id="drawer">
-  <header>
+  <header style="display:flex;align-items:center;padding:12px 16px">
     <strong id="dName" style="flex:1"></strong>
     <button class="btn ghost" id="dClose">✕</button>
   </header>
   <div class="body" id="dBody"></div>
 </div>
-
-<div class="modal" id="modal">
-  <h2 id="mTitle"></h2>
-  <div id="mBody"></div>
-</div>
-
+<div class="modal" id="modal"><h2 id="mTitle"></h2><div id="mBody"></div></div>
 <div class="toast" id="toast"></div>
 <input type="file" id="cvFile" accept=".pdf,.docx,.txt" class="hide">
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.117.3';
+const sb = createClient('https://hzsybxvvcexayducvfll.supabase.co', 'sb_publishable_jcQmXzefhryIcE7GLn-_8g_WcQCbBSK');
 
-const SUPABASE_URL = 'https://hzsybxvvcexayducvfll.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_jcQmXzefhryIcE7GLn-_8g_WcQCbBSK';
-const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
-
+/* ---------- helpers ---------- */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state = { stages: [], jobs: [], candidates: [], job: '', q: '', showClosed: false, drag: null };
+const nl = (s) => esc(s).replace(/\n/g, '<br>');
+const d = (s) => s ? new Date(s).toLocaleDateString('vi-VN') : '';
+const money = (n) => n == null ? '' : Number(n).toLocaleString('vi-VN');
+const today = () => new Date().toISOString().slice(0, 10);
+const addDays = (iso, n) => { const x = new Date(iso); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+const dayDiff = (iso) => Math.ceil((new Date(iso) - new Date(today())) / 86400000);
 
-function toast(msg, ms = 2600) {
+function toast(msg, ms = 2800) {
   const t = $('toast'); t.textContent = msg; t.classList.add('on');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms);
 }
 function daysAgo(ts) {
-  const d = Math.floor((Date.now() - new Date(ts)) / 86400000);
-  return d <= 0 ? 'hôm nay' : d === 1 ? '1 ngày' : d + ' ngày';
+  const n = Math.floor((Date.now() - new Date(ts)) / 86400000);
+  return n <= 0 ? 'hôm nay' : n + ' ngày';
 }
-function shade(i, n) {
-  const p = n > 1 ? i / (n - 1) : 0;
-  const mix = (a, b) => Math.round(a + (b - a) * p);
-  const bg = `rgb(${mix(217,15)},${mix(239,85)},${mix(232,71)})`;
-  return { bg, fg: p > 0.45 ? '#fff' : '#0f5547' };
+const state = { view: 'pipeline', q: '', job: '', showClosed: false, drag: null,
+  stages: [], jobs: [], candidates: [], employees: [], contracts: [], obItems: [], obTemplates: [], reviews: [] };
+
+/* ---------- generic form engine ---------- */
+function fieldsHTML(spec, v = {}, p = 'f') {
+  return spec.map(f => {
+    const id = `${p}_${f.k}`, val = v[f.k] ?? '';
+    let input;
+    if (f.type === 'select') {
+      input = `<select id="${id}">` + f.opts.map(o =>
+        `<option value="${esc(o[0])}" ${String(val) === String(o[0]) ? 'selected' : ''}>${esc(o[1])}</option>`).join('') + '</select>';
+    } else if (f.type === 'textarea') {
+      input = `<textarea id="${id}" rows="${f.rows || 4}" placeholder="${esc(f.hint || '')}">${esc(val)}</textarea>`;
+    } else {
+      input = `<input id="${id}" type="${f.type || 'text'}" ${f.step ? `step="${f.step}"` : ''} value="${esc(val)}" placeholder="${esc(f.hint || '')}">`;
+    }
+    return `<div class="field"${f.wide ? ' style="grid-column:1/-1"' : ''}><label>${esc(f.label)}</label>${input}</div>`;
+  }).join('');
 }
+function readFields(spec, p = 'f') {
+  const o = {};
+  for (const f of spec) {
+    let v = $(`${p}_${f.k}`).value.trim();
+    if (f.type === 'number') o[f.k] = v === '' ? null : Number(v);
+    else o[f.k] = v === '' ? null : v;
+  }
+  return o;
+}
+function formModal(title, spec, values, onSave) {
+  openModal(title, `<div class="row2">${fieldsHTML(spec, values)}</div>
+    <div class="actions"><button class="btn" id="fCancel">Huỷ</button><button class="btn primary" id="fSave">Lưu</button></div>`);
+  $('fCancel').onclick = closeAll;
+  $('fSave').onclick = async () => { await onSave(readFields(spec)); };
+}
+async function upsert(table, payload, id) {
+  const r = id ? await sb.from(table).update(payload).eq('id', id) : await sb.from(table).insert(payload);
+  if (r.error) { toast('Lỗi lưu: ' + r.error.message, 6000); return false; }
+  await loadAll(); render(); return true;
+}
+async function removeRow(table, id, label) {
+  if (!confirm('Xoá ' + label + '? Không khôi phục được.')) return;
+  const r = await sb.from(table).delete().eq('id', id);
+  if (r.error) return toast('Lỗi xoá: ' + r.error.message, 6000);
+  closeAll(); await loadAll(); render(); toast('Đã xoá');
+}
+
+/* ---------- overlays ---------- */
+function closeAll() { $('drawer').classList.remove('on'); $('modal').classList.remove('on'); $('scrim').classList.remove('on'); }
+function openModal(title, html) { $('mTitle').textContent = title; $('mBody').innerHTML = html; $('modal').classList.add('on'); $('scrim').classList.add('on'); }
+function openDrawer(title, html) { $('dName').textContent = title; $('dBody').innerHTML = html; $('drawer').classList.add('on'); $('scrim').classList.add('on'); }
+$('scrim').onclick = closeAll; $('dClose').onclick = closeAll;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
 
 /* ---------- auth ---------- */
 $('loginForm').addEventListener('submit', async (e) => {
@@ -157,53 +224,106 @@ $('loginForm').addEventListener('submit', async (e) => {
   $('loginMsg').textContent = error ? 'Lỗi: ' + error.message : 'Đã gửi link tới ' + email + '. Mở mail và bấm vào link.';
 });
 $('btnOut').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+$('btnRefresh').onclick = async () => { await loadAll(); render(); toast('Đã làm mới'); };
 
 /* ---------- data ---------- */
 async function loadAll() {
-  const [st, jb, cd] = await Promise.all([
+  const r = await Promise.all([
     sb.from('stages').select('*').order('sort_order'),
     sb.from('jobs').select('*').order('title'),
-    sb.from('candidates').select('*').order('stage_changed_at', { ascending: false })
+    sb.from('candidates').select('*').order('stage_changed_at', { ascending: false }),
+    sb.from('employees').select('*').order('full_name'),
+    sb.from('contracts').select('*').order('end_date', { nullsFirst: false }),
+    sb.from('onboarding_items').select('*').order('sort_order'),
+    sb.from('onboarding_templates').select('*, onboarding_template_items(*)').order('name'),
+    sb.from('probation_reviews').select('*').order('review_date', { ascending: false })
   ]);
-  for (const r of [st, jb, cd]) if (r.error) { toast('Lỗi tải dữ liệu: ' + r.error.message, 5000); return false; }
-  state.stages = st.data; state.jobs = jb.data; state.candidates = cd.data;
+  const bad = r.find(x => x.error);
+  if (bad) { toast('Lỗi tải dữ liệu: ' + bad.error.message, 6000); return false; }
+  [state.stages, state.jobs, state.candidates, state.employees, state.contracts, state.obItems, state.obTemplates, state.reviews] = r.map(x => x.data);
   return true;
 }
+const empName = (id) => state.employees.find(e => e.id === id)?.full_name || '';
+const jobName = (id) => state.jobs.find(j => j.id === id)?.title || '';
 
-function visible() {
-  const q = state.q.toLowerCase().trim();
-  return state.candidates.filter(c => {
-    if (!state.showClosed && c.status !== 'active') return false;
-    if (state.job && c.job_id !== state.job) return false;
-    if (!q) return true;
-    const hay = [c.full_name, c.email, c.phone, c.current_title, c.current_company, (c.skills || []).join(' ')].join(' ').toLowerCase();
-    return hay.includes(q);
-  });
-}
-
-/* ---------- render ---------- */
-function renderJobs() {
-  const sel = $('jobFilter');
-  sel.innerHTML = '<option value="">Tất cả vị trí</option>' +
-    state.jobs.map(j => `<option value="${j.id}" ${state.job === j.id ? 'selected' : ''}>${esc(j.title)}${j.is_open ? '' : ' (đóng)'}</option>`).join('');
-}
-
+/* ---------- router ---------- */
+const VIEWS = [
+  ['pipeline', 'Tuyển dụng'],
+  ['jobs', 'Vị trí & JD'],
+  ['people', 'Danh bạ nhân sự'],
+  ['org', 'Sơ đồ tổ chức'],
+  ['onboarding', 'Onboarding'],
+  ['contracts', 'Hợp đồng'],
+  ['probation', 'Thử việc']
+];
 function render() {
-  renderJobs();
-  const rows = visible();
-  const byStage = Object.fromEntries(state.stages.map(s => [s.key, []]));
-  for (const c of rows) (byStage[c.stage] ||= []).push(c);
+  $('nav').innerHTML = VIEWS.map(([k, l]) => `<button data-v="${k}" class="${state.view === k ? 'on' : ''}">${l}</button>`).join('');
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.v; state.q = ''; render(); });
+  ({ pipeline: viewPipeline, jobs: viewJobs, people: viewPeople, org: viewOrg,
+     onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation })[state.view]();
+}
+function searchBox(ph) {
+  return `<input type="search" id="tq" placeholder="${esc(ph)}" value="${esc(state.q)}">`;
+}
+function wireSearch() {
+  const i = $('tq'); if (!i) return;
+  i.oninput = e => { state.q = e.target.value; render(); i.focus(); };
+}
+const hit = (obj, keys) => {
+  const q = state.q.toLowerCase().trim();
+  if (!q) return true;
+  return keys.map(k => obj[k]).join(' ').toLowerCase().includes(q);
+};
 
-  $('summary').innerHTML = state.stages.map((s, i) => {
-    const { bg, fg } = shade(i, state.stages.length);
-    return `<div class="sum" style="background:${bg};color:${fg}"><b>${byStage[s.key].length}</b><span>${esc(s.label)}</span></div>`;
-  }).join('');
+/* =================== 1. PIPELINE (kanban) =================== */
+function shade(i, n) {
+  const p = n > 1 ? i / (n - 1) : 0, mix = (a, b) => Math.round(a + (b - a) * p);
+  return { bg: `rgb(${mix(217,15)},${mix(239,85)},${mix(232,71)})`, fg: p > 0.45 ? '#fff' : '#0f5547' };
+}
+const CAND_SPEC = () => [
+  { k: 'full_name', label: 'Họ tên *' },
+  { k: 'email', label: 'Email' },
+  { k: 'phone', label: 'Điện thoại' },
+  { k: 'current_title', label: 'Chức danh hiện tại' },
+  { k: 'current_company', label: 'Công ty hiện tại' },
+  { k: 'years_experience', label: 'Số năm kinh nghiệm', type: 'number', step: '0.1' },
+  { k: 'source', label: 'Nguồn' },
+  { k: 'job_id', label: 'Vị trí ứng tuyển', type: 'select', opts: [['', '— chưa gán —'], ...state.jobs.map(j => [j.id, j.title])] },
+  { k: 'stage', label: 'Vòng', type: 'select', opts: state.stages.map(s => [s.key, s.label]) },
+  { k: 'skills_text', label: 'Kỹ năng (cách nhau bằng dấu phẩy)', wide: true }
+];
+const toCand = (o) => { const { skills_text, ...r } = o; return { ...r, skills: skills_text ? skills_text.split(',').map(s => s.trim()).filter(Boolean) : [] }; };
+const fromCand = (c) => ({ ...c, skills_text: (c.skills || []).join(', ') });
 
-  $('board').innerHTML = state.stages.map(s => `
-    <div class="col" data-stage="${s.key}">
-      <h3><span>${esc(s.label)}</span><span>${byStage[s.key].length}</span></h3>
-      ${byStage[s.key].map(cardHTML).join('') || '<div class="empty">Chưa có ứng viên</div>'}
-    </div>`).join('');
+function viewPipeline() {
+  $('toolbar').innerHTML = `
+    <select id="jobFilter"><option value="">Tất cả vị trí</option>${state.jobs.map(j => `<option value="${j.id}" ${state.job === j.id ? 'selected' : ''}>${esc(j.title)}</option>`).join('')}</select>
+    ${searchBox('Tìm tên, email, skill, công ty...')}
+    <label class="check"><input type="checkbox" id="showClosed" ${state.showClosed ? 'checked' : ''}> Hiện ứng viên đã loại / rút</label>
+    <span class="spacer"></span>
+    <button class="btn" id="btnUpload">Tải CV lên</button>
+    <button class="btn primary" id="btnAddCand">+ Ứng viên</button>`;
+  wireSearch();
+  $('jobFilter').onchange = e => { state.job = e.target.value; render(); };
+  $('showClosed').onchange = e => { state.showClosed = e.target.checked; render(); };
+  $('btnAddCand').onclick = () => openAddCandidate();
+  $('btnUpload').onclick = () => $('cvFile').click();
+
+  const rows = state.candidates.filter(c =>
+    (state.showClosed || c.status === 'active') &&
+    (!state.job || c.job_id === state.job) &&
+    hit({ ...c, sk: (c.skills || []).join(' ') }, ['full_name', 'email', 'phone', 'current_title', 'current_company', 'sk']));
+  const by = Object.fromEntries(state.stages.map(s => [s.key, []]));
+  rows.forEach(c => (by[c.stage] ||= []).push(c));
+
+  $('view').innerHTML = `
+    <div class="summary">${state.stages.map((s, i) => { const { bg, fg } = shade(i, state.stages.length);
+      return `<div class="sum" style="background:${bg};color:${fg}"><b>${by[s.key].length}</b><span>${esc(s.label)}</span></div>`; }).join('')}</div>
+    <div class="board">${state.stages.map(s => `
+      <div class="col" data-stage="${s.key}">
+        <h3><span>${esc(s.label)}</span><span>${by[s.key].length}</span></h3>
+        ${by[s.key].map(candCard).join('') || '<div class="empty">Chưa có ứng viên</div>'}
+      </div>`).join('')}</div>`;
 
   document.querySelectorAll('.card').forEach(el => {
     el.addEventListener('dragstart', () => { state.drag = el.dataset.id; el.classList.add('dragging'); });
@@ -215,217 +335,117 @@ function render() {
     col.addEventListener('dragleave', () => col.classList.remove('over'));
     col.addEventListener('drop', async e => {
       e.preventDefault(); col.classList.remove('over');
-      const id = state.drag; const stage = col.dataset.stage;
-      if (!id) return;
+      const id = state.drag, stage = col.dataset.stage; if (!id) return;
       const c = state.candidates.find(x => x.id === id);
       if (!c || c.stage === stage) return;
       const prev = c.stage; c.stage = stage; c.stage_changed_at = new Date().toISOString(); render();
       const { error } = await sb.from('candidates').update({ stage }).eq('id', id);
-      if (error) { c.stage = prev; render(); toast('Không đổi được vòng: ' + error.message, 5000); }
+      if (error) { c.stage = prev; render(); toast('Không đổi được vòng: ' + error.message, 6000); }
       else toast(c.full_name + ' → ' + state.stages.find(s => s.key === stage).label);
     });
   });
 }
-
-function cardHTML(c) {
-  const job = state.jobs.find(j => j.id === c.job_id);
-  const sub = [c.current_title, c.current_company].filter(Boolean).join(' · ') || 'Chưa rõ vị trí hiện tại';
-  const tags = [];
-  if (job) tags.push(`<span class="tag">${esc(job.title)}</span>`);
-  if (c.years_experience != null) tags.push(`<span class="tag">${c.years_experience} năm</span>`);
-  tags.push(`<span class="tag">${daysAgo(c.stage_changed_at)}</span>`);
-  if (c.status !== 'active') tags.push(`<span class="tag warn">${c.status === 'rejected' ? 'đã loại' : 'đã rút'}</span>`);
+function candCard(c) {
+  const t = [];
+  if (c.job_id) t.push(`<span class="tag">${esc(jobName(c.job_id))}</span>`);
+  if (c.years_experience != null) t.push(`<span class="tag">${c.years_experience} năm</span>`);
+  t.push(`<span class="tag">${daysAgo(c.stage_changed_at)}</span>`);
+  if (c.status !== 'active') t.push(`<span class="tag warn">${c.status === 'rejected' ? 'đã loại' : 'đã rút'}</span>`);
   return `<div class="card" draggable="true" data-id="${c.id}">
     <div class="nm">${esc(c.full_name)}</div>
-    <div class="sub">${esc(sub)}</div>
-    <div class="tags">${tags.join('')}</div>
-  </div>`;
+    <div class="sub">${esc([c.current_title, c.current_company].filter(Boolean).join(' · ') || 'Chưa rõ vị trí hiện tại')}</div>
+    <div class="tags">${t.join('')}</div></div>`;
 }
-
-/* ---------- drawer ---------- */
-function closeAll() {
-  $('drawer').classList.remove('on'); $('modal').classList.remove('on'); $('scrim').classList.remove('on');
+function openAddCandidate(prefill = {}, pending = null) {
+  const v = fromCand({ stage: 'new', job_id: state.job || '', ...prefill });
+  formModal('Thêm ứng viên', CAND_SPEC(), v, async (raw) => {
+    const payload = toCand(raw);
+    if (!payload.full_name) return toast('Cần nhập họ tên');
+    if (pending?.text) payload.cv_text = pending.text.slice(0, 20000);
+    const { data, error } = await sb.from('candidates').insert(payload).select().single();
+    if (error) return toast('Lỗi lưu: ' + error.message, 6000);
+    if (pending?.file) {
+      const path = `${data.id}/${pending.file.name}`;
+      const up = await sb.storage.from('cvs').upload(path, pending.file, { upsert: true });
+      if (up.error) toast('Lưu hồ sơ OK nhưng upload CV lỗi: ' + up.error.message, 6000);
+      else await sb.from('candidates').update({ cv_path: path, cv_filename: pending.file.name }).eq('id', data.id);
+    }
+    closeAll(); await loadAll(); render(); toast('Đã thêm ' + payload.full_name);
+  });
 }
-$('scrim').onclick = closeAll; $('dClose').onclick = closeAll;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
-
 async function openCandidate(id) {
   const c = state.candidates.find(x => x.id === id); if (!c) return;
-  $('dName').textContent = c.full_name;
-  $('drawer').classList.add('on'); $('scrim').classList.add('on');
-  $('dBody').innerHTML = '<p class="empty">Đang tải...</p>';
+  openDrawer(c.full_name, '<p class="empty">Đang tải...</p>');
   const { data: events } = await sb.from('candidate_events').select('*').eq('candidate_id', id).order('created_at', { ascending: false });
-  $('dBody').innerHTML = `
-    ${formHTML(c, 'd')}
+  const spec = CAND_SPEC();
+  $('dBody').innerHTML = `<div class="row2">${fieldsHTML(spec, fromCand(c))}</div>
     <div class="actions">
       <button class="btn danger" id="dReject">${c.status === 'active' ? 'Loại ứng viên' : 'Mở lại'}</button>
-      <button class="btn primary" id="dSave">Lưu</button>
-    </div>
+      <button class="btn primary" id="dSave">Lưu</button></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
     <div class="field"><label>Thêm ghi chú</label><textarea id="dNote" rows="3" placeholder="Nhận xét phỏng vấn, mức lương mong muốn..."></textarea></div>
     <div class="actions"><button class="btn" id="dAddNote">Lưu ghi chú</button></div>
     <h4 style="margin:18px 0 10px">Lịch sử</h4>
     ${(events || []).map(evHTML).join('') || '<div class="empty">Chưa có hoạt động</div>'}
     ${c.cv_path ? `<div style="margin-top:14px"><button class="btn" id="dCv">Mở CV (${esc(c.cv_filename || 'file')})</button></div>` : ''}`;
-
   $('dSave').onclick = async () => {
-    const patch = readForm('d');
-    const { error } = await sb.from('candidates').update(patch).eq('id', id);
-    if (error) return toast('Lỗi lưu: ' + error.message, 5000);
-    await loadAll(); render(); openCandidate(id); toast('Đã lưu');
+    if (await upsert('candidates', toCand(readFields(spec)), id)) { openCandidate(id); toast('Đã lưu'); }
   };
   $('dReject').onclick = async () => {
-    const status = c.status === 'active' ? 'rejected' : 'active';
-    const { error } = await sb.from('candidates').update({ status }).eq('id', id);
-    if (error) return toast('Lỗi: ' + error.message, 5000);
-    await loadAll(); render(); openCandidate(id);
+    if (await upsert('candidates', { status: c.status === 'active' ? 'rejected' : 'active' }, id)) openCandidate(id);
   };
   $('dAddNote').onclick = async () => {
     const body = $('dNote').value.trim(); if (!body) return;
     const { error } = await sb.from('candidate_events').insert({ candidate_id: id, type: 'note', body });
-    if (error) return toast('Lỗi: ' + error.message, 5000);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
     openCandidate(id); toast('Đã thêm ghi chú');
   };
   const cv = $('dCv');
   if (cv) cv.onclick = async () => {
     const { data, error } = await sb.storage.from('cvs').createSignedUrl(c.cv_path, 300);
-    if (error) return toast('Lỗi: ' + error.message, 5000);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
     window.open(data.signedUrl, '_blank');
   };
 }
-
 function evHTML(e) {
-  const label = e.type === 'note' ? 'Ghi chú' :
-    e.type === 'created' ? 'Tạo hồ sơ' :
-    e.type === 'status_change' ? 'Đổi trạng thái: ' + e.body :
-    'Chuyển vòng: ' + (e.from_stage || '-') + ' → ' + e.to_stage;
+  const label = e.type === 'note' ? 'Ghi chú' : e.type === 'created' ? 'Tạo hồ sơ'
+    : e.type === 'status_change' ? 'Đổi trạng thái: ' + e.body
+    : 'Chuyển vòng: ' + (e.from_stage || '-') + ' → ' + e.to_stage;
   return `<div class="ev"><div class="when">${new Date(e.created_at).toLocaleString('vi-VN')}</div>
     <div>${esc(label)}</div>${e.type === 'note' ? `<div style="white-space:pre-wrap">${esc(e.body)}</div>` : ''}</div>`;
 }
 
-function formHTML(c, p) {
-  const jobOpts = ['<option value="">— chưa gán —</option>']
-    .concat(state.jobs.map(j => `<option value="${j.id}" ${c.job_id === j.id ? 'selected' : ''}>${esc(j.title)}</option>`)).join('');
-  const stageOpts = state.stages.map(s => `<option value="${s.key}" ${c.stage === s.key ? 'selected' : ''}>${esc(s.label)}</option>`).join('');
-  return `
-  <div class="field"><label>Họ tên *</label><input id="${p}_full_name" value="${esc(c.full_name)}"></div>
-  <div class="row2">
-    <div class="field"><label>Email</label><input id="${p}_email" value="${esc(c.email)}"></div>
-    <div class="field"><label>Điện thoại</label><input id="${p}_phone" value="${esc(c.phone)}"></div>
-  </div>
-  <div class="row2">
-    <div class="field"><label>Chức danh hiện tại</label><input id="${p}_current_title" value="${esc(c.current_title)}"></div>
-    <div class="field"><label>Công ty hiện tại</label><input id="${p}_current_company" value="${esc(c.current_company)}"></div>
-  </div>
-  <div class="row2">
-    <div class="field"><label>Số năm kinh nghiệm</label><input id="${p}_years_experience" type="number" step="0.1" value="${c.years_experience ?? ''}"></div>
-    <div class="field"><label>Nguồn</label><input id="${p}_source" value="${esc(c.source)}"></div>
-  </div>
-  <div class="field"><label>Vị trí ứng tuyển</label><select id="${p}_job_id">${jobOpts}</select></div>
-  <div class="field"><label>Vòng</label><select id="${p}_stage">${stageOpts}</select></div>
-  <div class="field"><label>Kỹ năng (cách nhau bằng dấu phẩy)</label><input id="${p}_skills" value="${esc((c.skills || []).join(', '))}"></div>`;
-}
-
-function readForm(p) {
-  const v = (k) => $(`${p}_${k}`).value.trim();
-  const y = v('years_experience');
-  return {
-    full_name: v('full_name'), email: v('email') || null, phone: v('phone') || null,
-    current_title: v('current_title') || null, current_company: v('current_company') || null,
-    years_experience: y === '' ? null : Number(y), source: v('source') || null,
-    job_id: v('job_id') || null, stage: v('stage'),
-    skills: v('skills') ? v('skills').split(',').map(s => s.trim()).filter(Boolean) : []
-  };
-}
-
-/* ---------- add candidate ---------- */
-function openModal(title, html) {
-  $('mTitle').textContent = title; $('mBody').innerHTML = html;
-  $('modal').classList.add('on'); $('scrim').classList.add('on');
-}
-
-function openAdd(prefill = {}, pending = null) {
-  const c = Object.assign({ full_name: '', email: '', phone: '', current_title: '', current_company: '', years_experience: null, source: '', job_id: state.job || '', stage: 'new', skills: [] }, prefill);
-  openModal('Thêm ứng viên', formHTML(c, 'a') + `<div class="actions"><button class="btn" id="aCancel">Huỷ</button><button class="btn primary" id="aSave">Lưu</button></div>`);
-  $('aCancel').onclick = closeAll;
-  $('aSave').onclick = async () => {
-    const payload = readForm('a');
-    if (!payload.full_name) return toast('Cần nhập họ tên');
-    if (pending) payload.cv_text = pending.text?.slice(0, 20000) || null;
-    const { data, error } = await sb.from('candidates').insert(payload).select().single();
-    if (error) return toast('Lỗi lưu: ' + error.message, 5000);
-    if (pending?.file) {
-      const path = `${data.id}/${pending.file.name}`;
-      const up = await sb.storage.from('cvs').upload(path, pending.file, { upsert: true });
-      if (up.error) toast('Lưu hồ sơ OK nhưng upload CV lỗi: ' + up.error.message, 5000);
-      else await sb.from('candidates').update({ cv_path: path, cv_filename: pending.file.name }).eq('id', data.id);
-    }
-    closeAll(); await loadAll(); render(); toast('Đã thêm ' + payload.full_name);
-  };
-}
-$('btnAdd').onclick = () => openAdd();
-
-/* ---------- jobs ---------- */
-$('btnJobs').onclick = () => {
-  openModal('Vị trí tuyển dụng', `
-    <div id="jobList">${state.jobs.map(j => `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-      <span style="flex:1">${esc(j.title)}${j.department ? ' · ' + esc(j.department) : ''}</span>
-      <button class="btn ghost" data-toggle="${j.id}">${j.is_open ? 'Đang mở' : 'Đã đóng'}</button></div>`).join('') || '<div class="empty">Chưa có vị trí nào</div>'}</div>
-    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
-    <div class="row2"><div class="field"><label>Tên vị trí</label><input id="jTitle"></div>
-    <div class="field"><label>Bộ phận</label><input id="jDept"></div></div>
-    <div class="actions"><button class="btn" id="jCancel">Đóng</button><button class="btn primary" id="jAdd">Thêm vị trí</button></div>`);
-  $('jCancel').onclick = closeAll;
-  $('jAdd').onclick = async () => {
-    const title = $('jTitle').value.trim(); if (!title) return toast('Nhập tên vị trí');
-    const { error } = await sb.from('jobs').insert({ title, department: $('jDept').value.trim() || null });
-    if (error) return toast('Lỗi: ' + error.message, 5000);
-    await loadAll(); render(); closeAll(); toast('Đã thêm vị trí ' + title);
-  };
-  document.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
-    const j = state.jobs.find(x => x.id === b.dataset.toggle);
-    await sb.from('jobs').update({ is_open: !j.is_open }).eq('id', j.id);
-    await loadAll(); render(); closeAll();
-  });
-};
-
-/* ---------- CV upload + parse ---------- */
-$('btnUpload').onclick = () => $('cvFile').click();
+/* CV upload + parse */
 $('cvFile').onchange = async (e) => {
-  const file = e.target.files[0]; e.target.value = '';
-  if (!file) return;
-  toast('Đang đọc ' + file.name + '...', 8000);
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  toast('Đang đọc ' + file.name + '...', 9000);
   let text = '';
   try { text = await extractText(file); } catch (err) { console.error(err); }
-  if (!text.trim()) { toast('Không đọc được nội dung CV, nhập tay giúp tớ', 5000); return openAdd({}, { file }); }
+  if (!text.trim()) { toast('Không đọc được nội dung CV, nhập tay giúp bạn nhé', 5000); return openAddCandidate({}, { file }); }
   let fields = {};
   try {
     const { data, error } = await sb.functions.invoke('parse-cv', { body: { text, filename: file.name } });
     if (error) throw error;
+    if (data?.not_a_cv) toast('File này giống mô tả công việc hơn là CV — kiểm tra lại giúp bạn nhé', 6000);
     fields = data?.candidate || {};
-    toast('Đã rút thông tin bằng ' + (data?.engine === 'ai' ? 'AI' : 'quy tắc') + ', kiểm tra lại giúp tớ', 4000);
-  } catch (err) {
-    toast('Parse lỗi (' + err.message + '), điền tay giúp tớ', 5000);
-  }
-  openAdd(fields, { file, text });
+    toast('Đã rút thông tin bằng ' + (data?.engine === 'ai' ? 'AI' : 'quy tắc') + ', kiểm tra lại trước khi lưu', 5000);
+  } catch (err) { toast('Parse lỗi (' + err.message + '), điền tay giúp bạn nhé', 6000); }
+  openAddCandidate(fields, { file, text });
 };
-
 async function extractText(file) {
-  const name = file.name.toLowerCase();
-  if (name.endsWith('.txt')) return await file.text();
-  if (name.endsWith('.docx')) {
+  const n = file.name.toLowerCase();
+  if (n.endsWith('.txt')) return await file.text();
+  if (n.endsWith('.docx')) {
     const mammoth = await import('https://esm.sh/mammoth@1.13.0');
-    const r = await (mammoth.default || mammoth).extractRawText({ arrayBuffer: await file.arrayBuffer() });
-    return r.value;
+    return (await (mammoth.default || mammoth).extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
   }
-  if (name.endsWith('.pdf')) {
+  if (n.endsWith('.pdf')) {
     const pdfjs = await import('https://esm.sh/pdfjs-dist@6.4.299/build/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@6.4.299/build/pdf.worker.min.mjs';
     const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
     let out = '';
     for (let p = 1; p <= Math.min(doc.numPages, 8); p++) {
-      const page = await doc.getPage(p);
-      const tc = await page.getTextContent();
+      const tc = await (await doc.getPage(p)).getTextContent();
       out += tc.items.map(i => i.str).join(' ') + '\n';
     }
     return out;
@@ -433,14 +453,344 @@ async function extractText(file) {
   return '';
 }
 
-/* ---------- wiring ---------- */
-$('jobFilter').onchange = e => { state.job = e.target.value; render(); };
-$('search').oninput = e => { state.q = e.target.value; render(); };
-$('showClosed').onchange = e => { state.showClosed = e.target.checked; render(); };
-$('btnRefresh').onclick = async () => { await loadAll(); render(); toast('Đã làm mới'); };
+/* =================== 2. JOBS & JD =================== */
+const JOB_SPEC = [
+  { k: 'title', label: 'Tên vị trí *' },
+  { k: 'department', label: 'Phòng ban' },
+  { k: 'headcount', label: 'Số lượng cần tuyển', type: 'number' },
+  { k: 'location', label: 'Nơi làm việc' },
+  { k: 'employment_type', label: 'Loại hình', type: 'select', opts: [['', '—'], ['Full-time', 'Full-time'], ['Part-time', 'Part-time'], ['Thực tập', 'Thực tập'], ['Thời vụ', 'Thời vụ']] },
+  { k: 'hiring_manager', label: 'Quản lý tuyển dụng' },
+  { k: 'salary_range', label: 'Dải lương' },
+  { k: 'target_date', label: 'Hạn tuyển xong', type: 'date' },
+  { k: 'is_open', label: 'Trạng thái', type: 'select', opts: [['true', 'Đang tuyển'], ['false', 'Đã đóng']] },
+  { k: 'jd_summary', label: 'Mô tả chung', type: 'textarea', wide: true, rows: 3 },
+  { k: 'jd_responsibilities', label: 'Trách nhiệm chính (mỗi dòng 1 ý)', type: 'textarea', wide: true, rows: 6 },
+  { k: 'jd_requirements', label: 'Yêu cầu (mỗi dòng 1 ý)', type: 'textarea', wide: true, rows: 6 },
+  { k: 'jd_benefits', label: 'Quyền lợi (mỗi dòng 1 ý)', type: 'textarea', wide: true, rows: 4 }
+];
+const toJob = (o) => ({ ...o, is_open: o.is_open === 'true', headcount: o.headcount ?? 1 });
 
+function viewJobs() {
+  $('toolbar').innerHTML = `${searchBox('Tìm vị trí, phòng ban...')}<span class="spacer"></span>
+    <button class="btn primary" id="btnAddJob">+ Vị trí</button>`;
+  wireSearch();
+  $('btnAddJob').onclick = () => formModal('Thêm vị trí', JOB_SPEC, { is_open: 'true', headcount: 1 },
+    async o => { if (!o.title) return toast('Cần nhập tên vị trí'); if (await upsert('jobs', toJob(o))) { closeAll(); toast('Đã thêm vị trí'); } });
+
+  const rows = state.jobs.filter(j => hit(j, ['title', 'department', 'location', 'hiring_manager']));
+  const countOf = (id) => state.candidates.filter(c => c.job_id === id && c.status === 'active').length;
+  const hired = (id) => state.candidates.filter(c => c.job_id === id && c.stage === 'hired').length;
+  $('view').innerHTML = rows.length ? `<div class="cards">${rows.map(j => `
+    <div class="panel" data-id="${j.id}" style="cursor:pointer">
+      <h4>${esc(j.title)}</h4>
+      <div class="meta">${esc([j.department, j.location, j.employment_type].filter(Boolean).join(' · ') || 'Chưa có thông tin')}</div>
+      <div class="tags" style="margin-top:10px">
+        <span class="tag ${j.is_open ? 'ok' : ''}">${j.is_open ? 'Đang tuyển' : 'Đã đóng'}</span>
+        <span class="tag">${hired(j.id)}/${j.headcount ?? 1} đã tuyển</span>
+        <span class="tag">${countOf(j.id)} ứng viên</span>
+        ${j.target_date ? `<span class="tag ${dayDiff(j.target_date) < 0 ? 'warn' : 'soon'}">hạn ${d(j.target_date)}</span>` : ''}
+        ${j.jd_summary || j.jd_requirements ? '<span class="tag ok">có JD</span>' : '<span class="tag warn">thiếu JD</span>'}
+      </div>
+    </div>`).join('')}</div>` : '<div class="empty">Chưa có vị trí nào. Bấm "+ Vị trí" để thêm.</div>';
+  document.querySelectorAll('.panel[data-id]').forEach(p => p.onclick = () => openJob(p.dataset.id));
+}
+function jdText(j) {
+  const sec = (t, v) => v ? `\n${t}\n${v}\n` : '';
+  return `${j.title}${j.department ? ' — ' + j.department : ''}\n` +
+    [j.location && 'Nơi làm việc: ' + j.location, j.employment_type && 'Loại hình: ' + j.employment_type,
+     j.salary_range && 'Mức lương: ' + j.salary_range, j.headcount && 'Số lượng: ' + j.headcount].filter(Boolean).join('\n') +
+    sec('\nMÔ TẢ', j.jd_summary) + sec('TRÁCH NHIỆM CHÍNH', j.jd_responsibilities) +
+    sec('YÊU CẦU', j.jd_requirements) + sec('QUYỀN LỢI', j.jd_benefits);
+}
+function openJob(id) {
+  const j = state.jobs.find(x => x.id === id); if (!j) return;
+  const cands = state.candidates.filter(c => c.job_id === id);
+  openDrawer(j.title, `<div class="row2">${fieldsHTML(JOB_SPEC, { ...j, is_open: String(j.is_open) })}</div>
+    <div class="actions">
+      <button class="btn danger" id="jDel">Xoá</button>
+      <button class="btn" id="jCopy">Sao chép JD</button>
+      <button class="btn primary" id="jSave">Lưu</button></div>
+    <h4 style="margin:18px 0 8px">Ứng viên (${cands.length})</h4>
+    ${cands.map(c => `<div class="meta">• ${esc(c.full_name)} — ${esc(state.stages.find(s => s.key === c.stage)?.label || c.stage)}${c.status !== 'active' ? ' (' + c.status + ')' : ''}</div>`).join('') || '<div class="empty">Chưa có ứng viên</div>'}`);
+  $('jSave').onclick = async () => { if (await upsert('jobs', toJob(readFields(JOB_SPEC)), id)) { openJob(id); toast('Đã lưu'); } };
+  $('jDel').onclick = () => removeRow('jobs', id, 'vị trí ' + j.title);
+  $('jCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(jdText(j)); toast('Đã copy JD vào clipboard'); }
+    catch { openModal('JD — ' + j.title, `<textarea rows="20" style="width:100%">${esc(jdText(j))}</textarea>`); }
+  };
+}
+
+/* =================== 3. DANH BẠ NHÂN SỰ =================== */
+const EMP_SPEC = () => [
+  { k: 'full_name', label: 'Họ tên *' },
+  { k: 'employee_code', label: 'Mã nhân viên' },
+  { k: 'title', label: 'Chức danh' },
+  { k: 'department', label: 'Phòng ban' },
+  { k: 'email', label: 'Email công ty' },
+  { k: 'phone', label: 'Điện thoại' },
+  { k: 'manager_id', label: 'Quản lý trực tiếp', type: 'select', opts: [['', '— không có —'], ...state.employees.map(e => [e.id, e.full_name + (e.title ? ' (' + e.title + ')' : '')])] },
+  { k: 'start_date', label: 'Ngày vào làm', type: 'date' },
+  { k: 'employment_type', label: 'Loại hình', type: 'select', opts: [['', '—'], ['Full-time', 'Full-time'], ['Part-time', 'Part-time'], ['Thực tập', 'Thực tập'], ['Thời vụ', 'Thời vụ']] },
+  { k: 'status', label: 'Trạng thái', type: 'select', opts: [['probation', 'Thử việc'], ['active', 'Chính thức'], ['left', 'Đã nghỉ']] },
+  { k: 'location', label: 'Nơi làm việc' },
+  { k: 'note', label: 'Ghi chú', type: 'textarea', wide: true, rows: 3 }
+];
+const STATUS_LABEL = { probation: 'Thử việc', active: 'Chính thức', left: 'Đã nghỉ' };
+
+function viewPeople() {
+  $('toolbar').innerHTML = `${searchBox('Tìm tên, chức danh, phòng ban, email...')}<span class="spacer"></span>
+    <button class="btn primary" id="btnAddEmp">+ Nhân sự</button>`;
+  wireSearch();
+  $('btnAddEmp').onclick = () => formModal('Thêm nhân sự', EMP_SPEC(), { status: 'probation', start_date: today() },
+    async o => { if (!o.full_name) return toast('Cần nhập họ tên'); if (await upsert('employees', o)) { closeAll(); toast('Đã thêm nhân sự'); } });
+
+  const rows = state.employees.filter(e => hit(e, ['full_name', 'title', 'department', 'email', 'phone', 'employee_code']));
+  $('view').innerHTML = rows.length ? `<table class="grid"><thead><tr>
+      <th>Họ tên</th><th>Chức danh</th><th>Phòng ban</th><th>Email</th><th>Điện thoại</th><th>Quản lý</th><th>Trạng thái</th></tr></thead>
+    <tbody>${rows.map(e => `<tr data-id="${e.id}">
+      <td><b>${esc(e.full_name)}</b>${e.employee_code ? `<div class="meta">${esc(e.employee_code)}</div>` : ''}</td>
+      <td>${esc(e.title)}</td><td>${esc(e.department)}</td>
+      <td>${esc(e.email)}</td><td>${esc(e.phone)}</td><td>${esc(empName(e.manager_id))}</td>
+      <td><span class="tag ${e.status === 'active' ? 'ok' : e.status === 'left' ? 'warn' : 'soon'}">${STATUS_LABEL[e.status]}</span></td>
+    </tr>`).join('')}</tbody></table>` : '<div class="empty">Chưa có nhân sự nào.</div>';
+  document.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openEmployee(tr.dataset.id));
+}
+function openEmployee(id) {
+  const e = state.employees.find(x => x.id === id); if (!e) return;
+  const spec = EMP_SPEC().map(f => f.k !== 'manager_id' ? f
+    : { ...f, opts: f.opts.filter(o => o[0] !== id) });
+  const cons = state.contracts.filter(c => c.employee_id === id);
+  const items = state.obItems.filter(i => i.employee_id === id);
+  const revs = state.reviews.filter(r => r.employee_id === id);
+  const doneN = items.filter(i => i.done).length;
+  openDrawer(e.full_name, `<div class="row2">${fieldsHTML(spec, e)}</div>
+    <div class="actions"><button class="btn danger" id="eDel">Xoá</button><button class="btn primary" id="eSave">Lưu</button></div>
+    <h4 style="margin:18px 0 8px">Hợp đồng (${cons.length})</h4>
+    ${cons.map(c => `<div class="meta">• ${esc(CONTRACT_TYPES[c.type] || c.type)} — ${d(c.start_date)} → ${c.end_date ? d(c.end_date) : 'không thời hạn'}${c.base_salary ? ' — ' + money(c.base_salary) + 'đ' : ''}</div>`).join('') || '<div class="empty">Chưa có hợp đồng</div>'}
+    <h4 style="margin:18px 0 8px">Onboarding</h4>
+    ${items.length ? `<div class="bar"><i style="width:${Math.round(doneN / items.length * 100)}%"></i></div><div class="meta">${doneN}/${items.length} việc xong</div>` : '<div class="empty">Chưa áp dụng mẫu onboarding</div>'}
+    <h4 style="margin:18px 0 8px">Đánh giá thử việc (${revs.length})</h4>
+    ${revs.map(r => `<div class="meta">• ${d(r.review_date)} — ${r.total ?? '-'}/5 — ${RESULT_LABEL[r.result] || 'chưa kết luận'}</div>`).join('') || '<div class="empty">Chưa có đánh giá</div>'}`);
+  $('eSave').onclick = async () => { if (await upsert('employees', readFields(spec), id)) { openEmployee(id); toast('Đã lưu'); } };
+  $('eDel').onclick = () => removeRow('employees', id, 'nhân sự ' + e.full_name);
+}
+
+/* =================== 4. SƠ ĐỒ TỔ CHỨC =================== */
+function viewOrg() {
+  $('toolbar').innerHTML = `<span class="meta">Sơ đồ dựng tự động từ cột "Quản lý trực tiếp" trong Danh bạ nhân sự.</span>`;
+  const active = state.employees.filter(e => e.status !== 'left');
+  const kids = (pid) => active.filter(e => (e.manager_id || null) === pid);
+  const seen = new Set();
+  const node = (e) => {
+    if (seen.has(e.id)) return `<li><div class="node"><b>${esc(e.full_name)}</b><span>vòng lặp quản lý — kiểm tra lại</span></div></li>`;
+    seen.add(e.id);
+    const ch = kids(e.id);
+    return `<li><div class="node"><b>${esc(e.full_name)}</b><span>${esc([e.title, e.department].filter(Boolean).join(' · '))}</span></div>
+      ${ch.length ? `<ul>${ch.map(node).join('')}</ul>` : ''}</li>`;
+  };
+  const roots = kids(null);
+  const orphans = active.filter(e => e.manager_id && !active.some(m => m.id === e.manager_id));
+  $('view').innerHTML = (roots.length || orphans.length)
+    ? `<div class="org"><ul>${roots.concat(orphans).map(node).join('')}</ul></div>`
+    : '<div class="empty">Chưa có nhân sự, hoặc mọi người đều có quản lý (vòng lặp). Thêm nhân sự ở tab Danh bạ.</div>';
+}
+
+/* =================== 5. ONBOARDING =================== */
+function viewOnboarding() {
+  $('toolbar').innerHTML = `${searchBox('Tìm nhân sự...')}<span class="spacer"></span>
+    <button class="btn" id="btnTpl">Mẫu checklist</button>`;
+  wireSearch();
+  $('btnTpl').onclick = showTemplates;
+  const rows = state.employees.filter(e => e.status !== 'left' && hit(e, ['full_name', 'title', 'department']));
+  $('view').innerHTML = rows.length ? `<div class="cards">${rows.map(e => {
+    const items = state.obItems.filter(i => i.employee_id === e.id);
+    const done = items.filter(i => i.done).length;
+    const late = items.filter(i => !i.done && i.due_date && dayDiff(i.due_date) < 0).length;
+    return `<div class="panel" data-emp="${e.id}" style="cursor:pointer">
+      <h4>${esc(e.full_name)}</h4>
+      <div class="meta">${esc([e.title, e.department].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
+      ${items.length ? `<div class="bar"><i style="width:${Math.round(done / items.length * 100)}%"></i></div>
+        <div class="tags"><span class="tag ${done === items.length ? 'ok' : ''}">${done}/${items.length} xong</span>
+        ${late ? `<span class="tag warn">${late} quá hạn</span>` : ''}</div>`
+      : '<div class="tags" style="margin-top:10px"><span class="tag soon">chưa có checklist</span></div>'}
+    </div>`; }).join('')}</div>` : '<div class="empty">Chưa có nhân sự.</div>';
+  document.querySelectorAll('[data-emp]').forEach(p => p.onclick = () => openOnboarding(p.dataset.emp));
+}
+function openOnboarding(empId) {
+  const e = state.employees.find(x => x.id === empId); if (!e) return;
+  const items = state.obItems.filter(i => i.employee_id === empId).sort((a, b) => a.sort_order - b.sort_order);
+  openDrawer('Onboarding — ' + e.full_name, `
+    ${items.length ? `<ul class="checklist">${items.map(i => `<li class="${i.done ? 'done' : ''}">
+        <input type="checkbox" data-item="${i.id}" ${i.done ? 'checked' : ''}>
+        <div style="flex:1"><span class="t">${esc(i.title)}</span>
+          <div class="meta">${esc(i.owner_role || '')}${i.due_date ? ' · hạn ' + d(i.due_date) : ''}${!i.done && i.due_date && dayDiff(i.due_date) < 0 ? ' · quá hạn' : ''}</div></div>
+      </li>`).join('')}</ul>
+      <div class="actions" style="margin-top:14px"><button class="btn danger" id="obClear">Xoá checklist</button></div>`
+    : `<p class="empty">Chưa có checklist. Chọn mẫu để tạo:</p>
+       <div class="field"><label>Mẫu</label><select id="obTpl">${state.obTemplates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div>
+       <div class="field"><label>Mốc ngày bắt đầu</label><input type="date" id="obStart" value="${e.start_date || today()}"></div>
+       <div class="actions"><button class="btn primary" id="obApply">Áp dụng mẫu</button></div>`}`);
+  document.querySelectorAll('[data-item]').forEach(cb => cb.onchange = async () => {
+    const r = await sb.from('onboarding_items').update({ done: cb.checked, done_at: cb.checked ? new Date().toISOString() : null }).eq('id', cb.dataset.item);
+    if (r.error) { cb.checked = !cb.checked; return toast('Lỗi: ' + r.error.message, 6000); }
+    await loadAll(); openOnboarding(empId); render();
+  });
+  const ap = $('obApply');
+  if (ap) ap.onclick = async () => {
+    const tpl = state.obTemplates.find(t => t.id === $('obTpl').value);
+    const base = $('obStart').value || today();
+    const rows = (tpl.onboarding_template_items || []).sort((a, b) => a.sort_order - b.sort_order).map(it => ({
+      employee_id: empId, title: it.title, owner_role: it.owner_role,
+      due_date: addDays(base, it.day_offset), sort_order: it.sort_order
+    }));
+    if (!rows.length) return toast('Mẫu này chưa có việc nào');
+    const { error } = await sb.from('onboarding_items').insert(rows);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    await loadAll(); openOnboarding(empId); render(); toast('Đã tạo ' + rows.length + ' việc');
+  };
+  const cl = $('obClear');
+  if (cl) cl.onclick = async () => {
+    if (!confirm('Xoá toàn bộ checklist của ' + e.full_name + '?')) return;
+    const { error } = await sb.from('onboarding_items').delete().eq('employee_id', empId);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    await loadAll(); openOnboarding(empId); render(); toast('Đã xoá checklist');
+  };
+}
+function showTemplates() {
+  openModal('Mẫu onboarding', state.obTemplates.map(t => `
+    <div class="panel" style="margin-bottom:10px"><h4>${esc(t.name)}</h4>
+      <ol class="meta" style="margin:6px 0 0;padding-left:18px">${(t.onboarding_template_items || [])
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map(i => `<li>${esc(i.title)} — ${esc(i.owner_role || '')} (ngày ${i.day_offset >= 0 ? '+' : ''}${i.day_offset})</li>`).join('')}</ol></div>`).join('')
+    + '<div class="actions"><button class="btn" id="tClose">Đóng</button></div>');
+  $('tClose').onclick = closeAll;
+}
+
+/* =================== 6. HỢP ĐỒNG =================== */
+const CONTRACT_TYPES = { thu_viec: 'Thử việc', xd_12: 'Xác định 12 tháng', xd_24: 'Xác định 24 tháng', khong_xd: 'Không xác định thời hạn', thoi_vu: 'Thời vụ / dịch vụ' };
+const CON_SPEC = () => [
+  { k: 'employee_id', label: 'Nhân sự *', type: 'select', opts: [['', '— chọn —'], ...state.employees.map(e => [e.id, e.full_name])] },
+  { k: 'contract_no', label: 'Số hợp đồng' },
+  { k: 'type', label: 'Loại hợp đồng', type: 'select', opts: Object.entries(CONTRACT_TYPES) },
+  { k: 'status', label: 'Trạng thái', type: 'select', opts: [['draft', 'Nháp'], ['active', 'Hiệu lực'], ['expired', 'Hết hạn'], ['terminated', 'Đã chấm dứt']] },
+  { k: 'signed_date', label: 'Ngày ký', type: 'date' },
+  { k: 'start_date', label: 'Hiệu lực từ', type: 'date' },
+  { k: 'end_date', label: 'Hết hạn (trống = không xác định)', type: 'date' },
+  { k: 'base_salary', label: 'Lương cơ bản (VND)', type: 'number' },
+  { k: 'note', label: 'Ghi chú', type: 'textarea', wide: true, rows: 3 }
+];
+function viewContracts() {
+  $('toolbar').innerHTML = `${searchBox('Tìm theo nhân sự, số HĐ...')}<span class="spacer"></span>
+    <button class="btn primary" id="btnAddCon">+ Hợp đồng</button>`;
+  wireSearch();
+  $('btnAddCon').onclick = () => formModal('Thêm hợp đồng', CON_SPEC(), { type: 'thu_viec', status: 'active', start_date: today() },
+    async o => { if (!o.employee_id) return toast('Chọn nhân sự'); if (await upsert('contracts', o)) { closeAll(); toast('Đã thêm hợp đồng'); } });
+
+  const rows = state.contracts
+    .map(c => ({ ...c, emp: empName(c.employee_id) }))
+    .filter(c => hit(c, ['emp', 'contract_no', 'note']));
+  const soon = rows.filter(c => c.status === 'active' && c.end_date && dayDiff(c.end_date) >= 0 && dayDiff(c.end_date) <= 30);
+  $('view').innerHTML = `
+    ${soon.length ? `<div class="panel" style="margin-bottom:12px;border-color:#e8d3ae;background:#fffaf0">
+      <b>Sắp hết hạn trong 30 ngày (${soon.length})</b>
+      ${soon.map(c => `<div class="meta">• ${esc(c.emp)} — ${esc(CONTRACT_TYPES[c.type] || c.type)} hết hạn ${d(c.end_date)} (còn ${dayDiff(c.end_date)} ngày)</div>`).join('')}</div>` : ''}
+    ${rows.length ? `<table class="grid"><thead><tr>
+      <th>Nhân sự</th><th>Số HĐ</th><th>Loại</th><th>Hiệu lực</th><th>Hết hạn</th><th>Lương CB</th><th>Trạng thái</th></tr></thead>
+      <tbody>${rows.map(c => {
+        const late = c.end_date && dayDiff(c.end_date) < 0;
+        const near = c.end_date && dayDiff(c.end_date) >= 0 && dayDiff(c.end_date) <= 30;
+        return `<tr data-con="${c.id}">
+          <td><b>${esc(c.emp)}</b></td><td>${esc(c.contract_no)}</td>
+          <td>${esc(CONTRACT_TYPES[c.type] || c.type)}</td>
+          <td>${d(c.start_date)}</td>
+          <td>${c.end_date ? `<span class="tag ${late ? 'warn' : near ? 'soon' : ''}">${d(c.end_date)}</span>` : '<span class="meta">không xác định</span>'}</td>
+          <td>${money(c.base_salary)}</td>
+          <td>${esc({ draft: 'Nháp', active: 'Hiệu lực', expired: 'Hết hạn', terminated: 'Đã chấm dứt' }[c.status])}</td></tr>`; }).join('')}</tbody></table>`
+      : '<div class="empty">Chưa có hợp đồng nào.</div>'}`;
+  document.querySelectorAll('[data-con]').forEach(tr => tr.onclick = () => openContract(tr.dataset.con));
+}
+function openContract(id) {
+  const c = state.contracts.find(x => x.id === id); if (!c) return;
+  const spec = CON_SPEC();
+  openDrawer('Hợp đồng — ' + empName(c.employee_id), `<div class="row2">${fieldsHTML(spec, c)}</div>
+    <div class="actions"><button class="btn danger" id="cDel">Xoá</button><button class="btn primary" id="cSave">Lưu</button></div>`);
+  $('cSave').onclick = async () => { if (await upsert('contracts', readFields(spec), id)) { closeAll(); toast('Đã lưu'); } };
+  $('cDel').onclick = () => removeRow('contracts', id, 'hợp đồng này');
+}
+
+/* =================== 7. ĐÁNH GIÁ THỬ VIỆC =================== */
+const CRITERIA = [
+  ['chuyen_mon', 'Chuyên môn / chất lượng công việc'],
+  ['tien_do', 'Tiến độ & khối lượng hoàn thành'],
+  ['thai_do', 'Thái độ, tinh thần trách nhiệm'],
+  ['phoi_hop', 'Phối hợp & giao tiếp'],
+  ['tuan_thu', 'Tuân thủ nội quy, giờ giấc']
+];
+const RESULT_LABEL = { pass: 'Đạt — ký chính thức', extend: 'Gia hạn thử việc', fail: 'Không đạt' };
+function viewProbation() {
+  $('toolbar').innerHTML = `${searchBox('Tìm nhân sự...')}<span class="spacer"></span>
+    <button class="btn primary" id="btnAddRev">+ Đánh giá</button>`;
+  wireSearch();
+  $('btnAddRev').onclick = () => openReviewForm(null);
+  const probs = state.employees.filter(e => e.status === 'probation' && hit(e, ['full_name', 'title', 'department']));
+  const reviewed = (id) => state.reviews.filter(r => r.employee_id === id);
+  $('view').innerHTML = `
+    <h2 class="sec">Đang thử việc (${probs.length})</h2>
+    ${probs.length ? `<div class="cards">${probs.map(e => {
+      const rs = reviewed(e.id), last = rs[0];
+      const due = e.start_date ? addDays(e.start_date, 60) : null;
+      return `<div class="panel" data-rev-emp="${e.id}" style="cursor:pointer">
+        <h4>${esc(e.full_name)}</h4>
+        <div class="meta">${esc([e.title, e.department].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
+        <div class="tags" style="margin-top:10px">
+          ${due ? `<span class="tag ${dayDiff(due) < 0 ? 'warn' : 'soon'}">hạn đánh giá ${d(due)}</span>` : ''}
+          ${last ? `<span class="tag ok">${last.total ?? '-'}/5 · ${esc(RESULT_LABEL[last.result] || 'chưa kết luận')}</span>` : '<span class="tag">chưa đánh giá</span>'}
+        </div></div>`; }).join('')}</div>` : '<div class="empty">Không có ai đang thử việc.</div>'}
+    <h2 class="sec" style="margin-top:22px">Lịch sử đánh giá (${state.reviews.length})</h2>
+    ${state.reviews.length ? `<table class="grid"><thead><tr><th>Nhân sự</th><th>Ngày</th><th>Người đánh giá</th><th>Điểm</th><th>Kết luận</th></tr></thead>
+      <tbody>${state.reviews.map(r => `<tr data-rev="${r.id}">
+        <td><b>${esc(empName(r.employee_id))}</b></td><td>${d(r.review_date)}</td><td>${esc(r.reviewer)}</td>
+        <td>${r.total ?? '-'}/5</td><td>${esc(RESULT_LABEL[r.result] || '')}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Chưa có đánh giá nào.</div>'}`;
+  document.querySelectorAll('[data-rev-emp]').forEach(p => p.onclick = () => openReviewForm(null, p.dataset.revEmp));
+  document.querySelectorAll('[data-rev]').forEach(tr => tr.onclick = () => openReviewForm(tr.dataset.rev));
+}
+function openReviewForm(id, empId) {
+  const r = id ? state.reviews.find(x => x.id === id) : null;
+  const sc = r?.scores || {};
+  const spec = [
+    { k: 'employee_id', label: 'Nhân sự *', type: 'select', opts: [['', '— chọn —'], ...state.employees.map(e => [e.id, e.full_name])] },
+    { k: 'review_date', label: 'Ngày đánh giá', type: 'date' },
+    { k: 'reviewer', label: 'Người đánh giá' },
+    { k: 'result', label: 'Kết luận', type: 'select', opts: [['', '— chưa kết luận —'], ...Object.entries(RESULT_LABEL)] },
+    ...CRITERIA.map(([k, l]) => ({ k: 's_' + k, label: l + ' (1-5)', type: 'number', step: '1' })),
+    { k: 'strengths', label: 'Điểm mạnh', type: 'textarea', wide: true, rows: 3 },
+    { k: 'improvements', label: 'Cần cải thiện', type: 'textarea', wide: true, rows: 3 },
+    { k: 'note', label: 'Ghi chú khác', type: 'textarea', wide: true, rows: 2 }
+  ];
+  const values = r
+    ? { ...r, ...Object.fromEntries(CRITERIA.map(([k]) => ['s_' + k, sc[k] ?? ''])) }
+    : { employee_id: empId || '', review_date: today() };
+  formModal(id ? 'Sửa đánh giá thử việc' : 'Đánh giá thử việc', spec, values, async (o) => {
+    if (!o.employee_id) return toast('Chọn nhân sự');
+    const scores = {}; let sum = 0, n = 0;
+    for (const [k] of CRITERIA) {
+      const v = o['s_' + k];
+      if (v != null) { scores[k] = v; sum += Number(v); n++; }
+      delete o['s_' + k];
+    }
+    const payload = { ...o, scores, total: n ? Math.round(sum / n * 10) / 10 : null };
+    if (await upsert('probation_reviews', payload, id)) { closeAll(); toast('Đã lưu đánh giá'); }
+  });
+  if (id) {
+    $('mBody').insertAdjacentHTML('beforeend', '<div class="actions"><button class="btn danger" id="rDel">Xoá đánh giá</button></div>');
+    $('rDel').onclick = () => removeRow('probation_reviews', id, 'đánh giá này');
+  }
+}
+
+/* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (_e, session) => { await boot(session); });
-
 async function boot(session) {
   session = session || (await sb.auth.getSession()).data.session;
   if (!session) { $('login').classList.remove('hide'); $('app').classList.add('hide'); return; }
