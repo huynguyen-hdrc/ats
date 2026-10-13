@@ -342,16 +342,16 @@ async function runAll() {
     let n = 0;
     for (let i = 0; i < 60; i++) {
       n = w.document.querySelectorAll('nav button').length;
-      if (n >= 11) break;
+      if (n >= 9) break;
       await new Promise(r => setTimeout(r, 500));
     }
     assert(!w.document.getElementById('app').classList.contains('hide'), 'app không hiện (chưa đăng nhập?)');
-    assert(n >= 11, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
+    assert(n >= 9, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
     return 'đăng nhập + render OK';
   });
-  const tabs = ['Bảng điều hành', 'Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding',
-    'Nghỉ phép', 'Hợp đồng', 'Thử việc', 'Thư & Email', 'Phân quyền'];
-  await t('Đủ 11 tab chức năng (tài khoản quản trị)', async () => {
+  const tabs = ['Tổng quan', 'Tuyển dụng', 'Vị trí & JD', 'Nhân sự mới', 'Hồ sơ nhân sự', 'Sơ đồ tổ chức',
+    'Nghỉ phép', 'Thư & Email', 'Phân quyền'];
+  await t('Đủ 9 tab chức năng (tài khoản quản trị)', async () => {
     const w = frame.contentWindow;
     const names = [...w.document.querySelectorAll('nav button')].map(b => b.textContent.trim().replace(/\s+\d+$/, ''));
     assert(names.length === tabs.length, 'có ' + names.length + ' tab: ' + names.join(', '));
@@ -735,6 +735,49 @@ async function runAll() {
     if (error) { warn('Không đọc được lịch (' + error.message + ') — kiểm tra thủ công trong Supabase'); return ''; }
     assert(data.some(j => j.jobname === 'hdrc-daily-reminders' && j.active), JSON.stringify(data));
     return 'hdrc-daily-reminders · 8h sáng hằng ngày';
+  });
+
+  /* ---------- L2. Vai trò & phân quyền ---------- */
+  group = 'L2. Vai trò & ma trận quyền';
+  await t('Bảng vai trò có đủ 4 vai trò hệ thống', async () => {
+    const { data, error } = await sb.from('roles').select('key, base, is_system');
+    if (error) throw new Error(error.message);
+    for (const k of ['admin', 'hr', 'manager', 'staff'])
+      assert(data.some(r => r.key === k && r.is_system), 'thiếu vai trò hệ thống ' + k);
+    return data.length + ' vai trò';
+  });
+  await t('Ma trận quyền phủ đủ nhóm chức năng × thao tác', async () => {
+    const { data, error } = await sb.from('role_perms').select('role_key, module, action, allowed');
+    if (error) throw new Error(error.message);
+    const byRole = {};
+    for (const r of data) byRole[r.role_key] = (byRole[r.role_key] || 0) + 1;
+    for (const k of ['admin', 'hr', 'manager', 'staff']) assert(byRole[k] === 72, `${k} có ${byRole[k]} dòng quyền, cần 72`);
+    const adminOn = data.filter(r => r.role_key === 'admin' && r.allowed).length;
+    assert(adminOn === 72, 'quản trị không đủ toàn quyền: ' + adminOn);
+    return Object.keys(byRole).length + ' vai trò × 72 quyền';
+  });
+  await t('Nhân viên không có quyền xem lương / hợp đồng', async () => {
+    const { data, error } = await sb.from('role_perms').select('allowed')
+      .eq('role_key', 'staff').eq('module', 'contracts').eq('action', 'view').single();
+    if (error) throw new Error(error.message);
+    assert(data.allowed === false, 'staff đang được bật quyền xem hợp đồng');
+    return 'đã tắt';
+  });
+  await t('Khách chưa đăng nhập không gọi được has_perm', async () => {
+    const r = await fetch(`${URL_}/rest/v1/rpc/has_perm`, { method: 'POST', headers: { apikey: KEY, 'content-type': 'application/json' }, body: JSON.stringify({ p_module: 'contracts', p_action: 'view' }) });
+    assert(r.status >= 400, 'gọi được — hàm đang hở!');
+    return `bị chặn, HTTP ${r.status}`;
+  });
+  await t('my_role() quy về nhóm quyền gốc', async () => {
+    const { data, error } = await sb.rpc('my_role');
+    if (error) throw new Error(error.message);
+    assert(['admin', 'hr', 'manager', 'staff'].includes(data), 'trả về ' + data);
+    return 'nhóm gốc: ' + data;
+  });
+  await t('Xác nhận thử việc có cột lưu người xác nhận', async () => {
+    const { error } = await sb.from('probation_reviews').select('confirmed_by, confirmed_at').limit(1);
+    if (error) throw new Error(error.message);
+    return 'confirmed_by + confirmed_at';
   });
 
   /* ---------- L. Sao lưu ---------- */

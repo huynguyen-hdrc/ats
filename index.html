@@ -169,7 +169,8 @@ function daysAgo(ts) {
 const state = { view: 'pipeline', q: '', job: '', showClosed: false, drag: null,
   stages: [], jobs: [], candidates: [], employees: [], contracts: [], obItems: [], obTemplates: [], reviews: [],
   templates: [], offers: [], emails: [], me: '', resend: null,
-  role: 'staff', myEmp: null, profiles: [], leaveTypes: [], leaves: [], balances: [], notifs: [] };
+  role: 'staff', roleKey: 'staff', myEmp: null, profiles: [], leaveTypes: [], leaves: [], balances: [], notifs: [],
+  roles: [], rolePerms: [] };
 
 /* ---------- generic form engine ---------- */
 function fieldsHTML(spec, v = {}, p = 'f') {
@@ -257,15 +258,19 @@ async function loadAll() {
     sb.from('leave_types').select('*').order('sort_order'),
     sb.from('leave_requests').select('*').order('start_date', { ascending: false }).limit(500),
     sb.from('leave_balances').select('*'),
-    sb.from('notifications').select('*').eq('status', 'open').order('due_date')
+    sb.from('notifications').select('*').eq('status', 'open').order('due_date'),
+    sb.from('roles').select('*').order('sort'),
+    sb.from('role_perms').select('*')
   ]);
   const bad = r.find(x => x.error);
   if (bad) { toast('Lỗi tải dữ liệu: ' + bad.error.message, 6000); return false; }
   [state.stages, state.jobs, state.candidates, state.employees, state.contracts, state.obItems, state.obTemplates,
    state.reviews, state.templates, state.offers, state.emails,
-   state.profiles, state.leaveTypes, state.leaves, state.balances, state.notifs] = r.map(x => x.data || []);
+   state.profiles, state.leaveTypes, state.leaves, state.balances, state.notifs,
+   state.roles, state.rolePerms] = r.map(x => x.data || []);
   const me = state.profiles.find(p => p.email === state.me);
-  if (me) { state.role = me.role; state.myEmp = me.employee_id; }
+  if (me) { state.roleKey = me.role; state.myEmp = me.employee_id;
+    state.role = (state.roles.find(x => x.key === me.role) || {}).base || me.role; }
   return true;
 }
 const empName = (id) => state.employees.find(e => e.id === id)?.full_name || '';
@@ -274,20 +279,35 @@ const jobName = (id) => state.jobs.find(j => j.id === id)?.title || '';
 /* ---------- router ---------- */
 const HR = ['admin', 'hr'], MGR = ['admin', 'hr', 'manager'], ALL = ['admin', 'hr', 'manager', 'staff'];
 const VIEWS = [
-  ['dash', 'Bảng điều hành', ALL],
+  ['dash', 'Tổng quan', ALL],
   ['pipeline', 'Tuyển dụng', MGR],
   ['jobs', 'Vị trí & JD', ALL],
-  ['people', 'Danh bạ nhân sự', ALL],
+  ['newhire', 'Nhân sự mới', ALL],
+  ['people', 'Hồ sơ nhân sự', ALL],
   ['org', 'Sơ đồ tổ chức', ALL],
-  ['onboarding', 'Onboarding', ALL],
   ['leave', 'Nghỉ phép', ALL],
-  ['contracts', 'Hợp đồng', HR],
-  ['probation', 'Thử việc', MGR],
   ['mail', 'Thư & Email', MGR],
   ['settings', 'Phân quyền', HR]
 ];
 const can = (roles) => roles.includes(state.role);
 const isHR = () => HR.includes(state.role);
+const PERM_MODULES = [
+  ['candidates', 'Ứng viên'], ['jobs', 'Vị trí & JD'], ['offers', 'Offer letter'],
+  ['employees', 'Hồ sơ nhân sự'], ['contracts', 'Hợp đồng'], ['leave', 'Nghỉ phép'],
+  ['onboarding', 'Onboarding'], ['probation', 'Thử việc'], ['mail', 'Thư & Email'],
+  ['reports', 'Báo cáo'], ['backups', 'Sao lưu'], ['settings', 'Phân quyền']
+];
+const PERM_ACTIONS = [
+  ['view', 'Xem'], ['create', 'Tạo mới'], ['edit', 'Sửa'],
+  ['delete', 'Xoá'], ['approve', 'Duyệt / xác nhận'], ['comment', 'Ghi chú / bình luận']
+];
+const ROLE_BASES = [['admin', 'Quản trị'], ['hr', 'Nhân sự'], ['manager', 'Quản lý'], ['staff', 'Nhân viên']];
+function perm(module, action) {
+  if (state.role === 'admin') return true;
+  const r = state.rolePerms.find(x => x.role_key === state.roleKey && x.module === module && x.action === action);
+  return !!(r && r.allowed);
+}
+const roleLabel = (k) => (state.roles.find(r => r.key === k) || {}).label || ROLE_LABEL[k] || k;
 function render() {
   const allowed = VIEWS.filter(([, , roles]) => can(roles));
   if (!allowed.some(([k]) => k === state.view)) state.view = allowed[0][0];
@@ -297,7 +317,7 @@ function render() {
   }).join('');
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.v; state.q = ''; render(); });
   ({ pipeline: viewPipeline, jobs: viewJobs, people: viewPeople, org: viewOrg,
-     onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation, mail: viewMail,
+     newhire: viewNewHires, mail: viewMail,
      dash: viewDash, leave: viewLeave, settings: viewSettings })[state.view]();
   wireXlsx();
 }
@@ -350,12 +370,12 @@ function viewPipeline() {
     <label class="check"><input type="checkbox" id="showClosed" ${state.showClosed ? 'checked' : ''}> Hiện ứng viên đã loại / rút</label>
     <span class="spacer"></span>
     <button class="btn" id="btnUpload">Tải CV lên</button>
-    <button class="btn primary" id="btnAddCand">+ Ứng viên</button>
+    ${perm('candidates', 'create') ? '<button class="btn primary" id="btnAddCand">+ Ứng viên</button>' : ''}
     ${xlsxBar('candidates')}`;
   wireSearch();
   $('jobFilter').onchange = e => { state.job = e.target.value; render(); };
   $('showClosed').onchange = e => { state.showClosed = e.target.checked; render(); };
-  $('btnAddCand').onclick = () => openAddCandidate();
+  if ($('btnAddCand')) $('btnAddCand').onclick = () => openAddCandidate();
   $('btnUpload').onclick = () => $('cvFile').click();
 
   const rows = state.candidates.filter(c =>
@@ -526,9 +546,9 @@ const toJob = (o) => ({ ...o, is_open: o.is_open === 'true', headcount: o.headco
 
 function viewJobs() {
   $('toolbar').innerHTML = `${searchBox('Tìm vị trí, phòng ban...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddJob">+ Vị trí</button>${xlsxBar('jobs')}`;
+    ${perm('jobs', 'create') ? '<button class="btn primary" id="btnAddJob">+ Vị trí</button>' : ''}${xlsxBar('jobs')}`;
   wireSearch();
-  $('btnAddJob').onclick = () => formModal('Thêm vị trí', JOB_SPEC, { is_open: 'true', headcount: 1 },
+  if ($('btnAddJob')) $('btnAddJob').onclick = () => formModal('Thêm vị trí', JOB_SPEC, { is_open: 'true', headcount: 1 },
     async o => { if (!o.title) return toast('Cần nhập tên vị trí'); if (await upsert('jobs', toJob(o))) { closeAll(); toast('Đã thêm vị trí'); } });
 
   const rows = state.jobs.filter(j => hit(j, ['title', 'department', 'location', 'hiring_manager']));
@@ -563,11 +583,13 @@ function openJob(id) {
     <div class="actions">
       <button class="btn danger" id="jDel">Xoá</button>
       <button class="btn" id="jCopy">Sao chép JD</button>
+      <button class="btn" id="jPrint">In JD / PDF</button>
       <button class="btn primary" id="jSave">Lưu</button></div>
     <h4 style="margin:18px 0 8px">Ứng viên (${cands.length})</h4>
     ${cands.map(c => `<div class="meta">• ${esc(c.full_name)} — ${esc(state.stages.find(s => s.key === c.stage)?.label || c.stage)}${c.status !== 'active' ? ' (' + c.status + ')' : ''}</div>`).join('') || '<div class="empty">Chưa có ứng viên</div>'}`);
   $('jSave').onclick = async () => { if (await upsert('jobs', toJob(readFields(JOB_SPEC)), id)) { openJob(id); toast('Đã lưu'); } };
   $('jDel').onclick = () => removeRow('jobs', id, 'vị trí ' + j.title);
+  $('jPrint').onclick = () => printJD(j);
   $('jCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(jdText(j)); toast('Đã copy JD vào clipboard'); }
     catch { openModal('JD — ' + j.title, `<textarea rows="20" style="width:100%">${esc(jdText(j))}</textarea>`); }
@@ -595,9 +617,12 @@ const STATUS_LABEL = { probation: 'Thử việc', active: 'Chính thức', left:
 
 function viewPeople() {
   $('toolbar').innerHTML = `${searchBox('Tìm tên, chức danh, phòng ban, email...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddEmp">+ Nhân sự</button>${xlsxBar('employees')}`;
+    ${isHR() && perm('contracts', 'create') ? '<button class="btn" id="btnAddCon">+ Hợp đồng</button>' : ''}
+    ${perm('employees', 'create') ? '<button class="btn primary" id="btnAddEmp">+ Nhân sự</button>' : ''}${xlsxBar('employees')}`;
   wireSearch();
-  $('btnAddEmp').onclick = () => formModal('Thêm nhân sự', EMP_SPEC(), { status: 'probation', start_date: today() },
+  if ($('btnAddCon')) $('btnAddCon').onclick = () => formModal('Thêm hợp đồng', CON_SPEC(), { type: 'thu_viec', status: 'active', start_date: today() },
+    async o => { if (!o.employee_id) return toast('Chọn nhân sự'); if (await upsert('contracts', o)) { closeAll(); toast('Đã thêm hợp đồng'); } });
+  if ($('btnAddEmp')) $('btnAddEmp').onclick = () => formModal('Thêm nhân sự', EMP_SPEC(), { status: 'probation', start_date: today() },
     async o => { if (!o.full_name) return toast('Cần nhập họ tên'); if (await upsert('employees', o)) { closeAll(); toast('Đã thêm nhân sự'); } });
 
   const rows = state.employees.filter(e => hit(e, ['full_name', 'title', 'department', 'email', 'phone', 'employee_code']));
@@ -610,6 +635,10 @@ function viewPeople() {
       <td><span class="tag ${e.status === 'active' ? 'ok' : e.status === 'left' ? 'warn' : 'soon'}">${STATUS_LABEL[e.status]}</span></td>
     </tr>`).join('')}</tbody></table>` : '<div class="empty">Chưa có nhân sự nào.</div>';
   document.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openEmployee(tr.dataset.id));
+  if (isHR()) {
+    $('view').insertAdjacentHTML('beforeend', contractsSectionHTML());
+    document.querySelectorAll('[data-con]').forEach(tr => tr.onclick = () => openContract(tr.dataset.con));
+  }
 }
 function openEmployee(id) {
   const e = state.employees.find(x => x.id === id); if (!e) return;
@@ -620,7 +649,7 @@ function openEmployee(id) {
   const revs = state.reviews.filter(r => r.employee_id === id);
   const doneN = items.filter(i => i.done).length;
   openDrawer(e.full_name, `<div class="row2">${fieldsHTML(spec, e)}</div>
-    <div class="actions"><button class="btn danger" id="eDel">Xoá</button>
+    <div class="actions">${perm('employees', 'delete') ? '<button class="btn danger" id="eDel">Xoá</button>' : ''}
       ${isHR() ? '<button class="btn" id="eDocs">Hồ sơ & giấy tờ</button>' : ''}
       <button class="btn primary" id="eSave">Lưu</button></div>
     <h4 style="margin:18px 0 8px">Hợp đồng (${cons.length})</h4>
@@ -630,7 +659,7 @@ function openEmployee(id) {
     <h4 style="margin:18px 0 8px">Đánh giá thử việc (${revs.length})</h4>
     ${revs.map(r => `<div class="meta">• ${d(r.review_date)} — ${r.total ?? '-'}/5 — ${RESULT_LABEL[r.result] || 'chưa kết luận'}</div>`).join('') || '<div class="empty">Chưa có đánh giá</div>'}`);
   $('eSave').onclick = async () => { if (await upsert('employees', readFields(spec), id)) { openEmployee(id); toast('Đã lưu'); } };
-  $('eDel').onclick = () => removeRow('employees', id, 'nhân sự ' + e.full_name);
+  if ($('eDel')) $('eDel').onclick = () => removeRow('employees', id, 'nhân sự ' + e.full_name);
   if ($('eDocs')) $('eDocs').onclick = () => openEmployeeDocs(id);
 }
 
@@ -655,25 +684,83 @@ function viewOrg() {
 }
 
 /* =================== 5. ONBOARDING =================== */
-function viewOnboarding() {
-  $('toolbar').innerHTML = `${searchBox('Tìm nhân sự...')}<span class="spacer"></span>
-    <button class="btn" id="btnTpl">Mẫu checklist</button>${xlsxBar('onboarding')}`;
+function probDue(e) {
+  const c = state.contracts.filter(x => x.employee_id === e.id && x.type === 'thu_viec' && x.end_date)
+    .sort((a, b) => String(b.start_date || '').localeCompare(String(a.start_date || '')))[0];
+  if (c) return c.end_date;
+  return e.start_date ? addDays(e.start_date, 60) : null;
+}
+function obStat(empId) {
+  const items = state.obItems.filter(i => i.employee_id === empId);
+  const done = items.filter(i => i.done).length;
+  const late = items.filter(i => !i.done && i.due_date && dayDiff(i.due_date) < 0).length;
+  return { items, done, late, complete: items.length > 0 && done === items.length };
+}
+function lastReview(empId) {
+  return state.reviews.filter(r => r.employee_id === empId)
+    .sort((a, b) => String(b.review_date || '').localeCompare(String(a.review_date || '')))[0];
+}
+async function confirmProbation(empId) {
+  const e = state.employees.find(x => x.id === empId); if (!e) return;
+  const st = obStat(empId);
+  if (!st.complete) return toast('Checklist onboarding chưa xong', 4000);
+  const r = lastReview(empId);
+  if (!r) return toast('Chưa có đánh giá thử việc', 4000);
+  if (r.result !== 'pass') return toast('Đánh giá chưa đạt — chưa chuyển nhóm được', 5000);
+  if (!confirm(`Xác nhận ${e.full_name} hoàn tất thử việc và chuyển sang Hồ sơ nhân sự?`)) return;
+  const { data: { user } } = await sb.auth.getUser();
+  await sb.from('probation_reviews').update({ confirmed_by: user.id, confirmed_at: new Date().toISOString() }).eq('id', r.id);
+  if (await upsert('employees', { status: 'active' }, empId)) toast('Đã chuyển sang Hồ sơ nhân sự');
+}
+function viewNewHires() {
+  $('toolbar').innerHTML = `${searchBox('Tìm nhân sự mới...')}<span class="spacer"></span>
+    <button class="btn" id="btnTpl">Mẫu checklist</button>
+    ${perm('probation', 'create') ? '<button class="btn" id="btnAddRev">+ Đánh giá</button>' : ''}${xlsxBar('onboarding')}`;
   wireSearch();
   $('btnTpl').onclick = showTemplates;
-  const rows = state.employees.filter(e => e.status !== 'left' && hit(e, ['full_name', 'title', 'department']));
-  $('view').innerHTML = rows.length ? `<div class="cards">${rows.map(e => {
-    const items = state.obItems.filter(i => i.employee_id === e.id);
-    const done = items.filter(i => i.done).length;
-    const late = items.filter(i => !i.done && i.due_date && dayDiff(i.due_date) < 0).length;
-    return `<div class="panel" data-emp="${e.id}" style="cursor:pointer">
-      <h4>${esc(e.full_name)}</h4>
-      <div class="meta">${esc([e.title, e.level, e.department, e.business_unit].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
-      ${items.length ? `<div class="bar"><i style="width:${Math.round(done / items.length * 100)}%"></i></div>
-        <div class="tags"><span class="tag ${done === items.length ? 'ok' : ''}">${done}/${items.length} xong</span>
-        ${late ? `<span class="tag warn">${late} quá hạn</span>` : ''}</div>`
-      : '<div class="tags" style="margin-top:10px"><span class="tag soon">chưa có checklist</span></div>'}
-    </div>`; }).join('')}</div>` : '<div class="empty">Chưa có nhân sự.</div>';
-  document.querySelectorAll('[data-emp]').forEach(p => p.onclick = () => openOnboarding(p.dataset.emp));
+  if ($('btnAddRev')) $('btnAddRev').onclick = () => openReviewForm(null);
+  const rows = state.employees.filter(e => e.status === 'probation' && hit(e, ['full_name', 'title', 'department']));
+  $('view').innerHTML = `
+    <div class="meta" style="margin-bottom:10px">Nhân sự đã nhận offer và vào làm, còn trong thời gian thử việc. Hồ sơ ở lại nhóm này cho tới khi checklist onboarding xong và quản lý xác nhận đạt — sau đó tự chuyển sang Hồ sơ nhân sự.</div>
+    ${rows.length ? `<div class="cards">${rows.map(e => {
+      const st = obStat(e.id), due = probDue(e), last = lastReview(e.id);
+      const pct = st.items.length ? Math.round(st.done / st.items.length * 100) : 0;
+      const canConfirm = st.complete && last && last.result === 'pass' && perm('probation', 'approve');
+      return `<div class="panel">
+        <h4>${esc(e.full_name)}</h4>
+        <div class="meta">${esc([e.title, e.level, e.department, e.business_unit].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
+        ${st.items.length ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
+        <div class="tags" style="margin-top:8px">
+          ${st.items.length
+            ? (st.complete
+                ? '<span class="tag ok">✓ Onboarding xong</span>'
+                : `<span class="tag">☐ Onboarding ${st.done}/${st.items.length}</span>`)
+            : '<span class="tag soon">☐ Chưa có checklist</span>'}
+          ${st.late ? `<span class="tag warn">⚠ ${st.late} quá hạn</span>` : ''}
+          ${st.complete && due ? `<span class="tag ${dayDiff(due) < 0 ? 'warn' : 'soon'}">⏱ Thử việc · hạn ${d(due)}</span>` : ''}
+          ${st.complete ? (last
+            ? `<span class="tag ${last.result === 'pass' ? 'ok' : ''}">${last.total ?? '-'}/5 · ${esc(RESULT_LABEL[last.result] || 'chưa kết luận')}</span>`
+            : '<span class="tag">chưa đánh giá</span>') : ''}
+        </div>
+        <div class="actions" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn sm" data-nh-ob="${e.id}">Checklist</button>
+          <button class="btn sm" data-nh-rev="${e.id}">Đánh giá</button>
+          <button class="btn sm" data-nh-emp="${e.id}">Hồ sơ</button>
+          ${canConfirm ? `<button class="btn sm primary" data-nh-ok="${e.id}">Xác nhận hoàn tất</button>` : ''}
+        </div></div>`; }).join('')}</div>`
+      : '<div class="empty">Không có nhân sự mới nào đang thử việc.</div>'}
+    <h2 class="sec" style="margin-top:22px">Lịch sử đánh giá (${state.reviews.length})</h2>
+    ${state.reviews.length ? `<table class="grid"><thead><tr><th>Nhân sự</th><th>Ngày</th><th>Người đánh giá</th><th>Điểm</th><th>Kết luận</th><th>Xác nhận</th></tr></thead>
+      <tbody>${state.reviews.map(r => `<tr data-rev="${r.id}">
+        <td><b>${esc(empName(r.employee_id))}</b></td><td>${d(r.review_date)}</td><td>${esc(r.reviewer)}</td>
+        <td>${r.total ?? '-'}/5</td><td>${esc(RESULT_LABEL[r.result] || '')}</td>
+        <td>${r.confirmed_at ? `<span class="tag ok">✓ ${d(r.confirmed_at)}</span>` : '<span class="meta">chưa</span>'}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Chưa có đánh giá nào.</div>'}`;
+  document.querySelectorAll('[data-nh-ob]').forEach(b => b.onclick = () => openOnboarding(b.dataset.nhOb));
+  document.querySelectorAll('[data-nh-rev]').forEach(b => b.onclick = () => openReviewForm(null, b.dataset.nhRev));
+  document.querySelectorAll('[data-nh-emp]').forEach(b => b.onclick = () => openEmployee(b.dataset.nhEmp));
+  document.querySelectorAll('[data-nh-ok]').forEach(b => b.onclick = () => confirmProbation(b.dataset.nhOk));
+  document.querySelectorAll('[data-rev]').forEach(tr => tr.onclick = () => openReviewForm(tr.dataset.rev));
 }
 function openOnboarding(empId) {
   const e = state.employees.find(x => x.id === empId); if (!e) return;
@@ -738,18 +825,10 @@ const CON_SPEC = () => [
   { k: 'base_salary', label: 'Lương cơ bản (VND)', type: 'number' },
   { k: 'note', label: 'Ghi chú', type: 'textarea', wide: true, rows: 3 }
 ];
-function viewContracts() {
-  $('toolbar').innerHTML = `${searchBox('Tìm theo nhân sự, số HĐ...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddCon">+ Hợp đồng</button>${xlsxBar('contracts')}`;
-  wireSearch();
-  $('btnAddCon').onclick = () => formModal('Thêm hợp đồng', CON_SPEC(), { type: 'thu_viec', status: 'active', start_date: today() },
-    async o => { if (!o.employee_id) return toast('Chọn nhân sự'); if (await upsert('contracts', o)) { closeAll(); toast('Đã thêm hợp đồng'); } });
-
-  const rows = state.contracts
-    .map(c => ({ ...c, emp: empName(c.employee_id) }))
-    .filter(c => hit(c, ['emp', 'contract_no', 'note']));
+function contractsSectionHTML() {
+  const rows = state.contracts.map(c => ({ ...c, emp: empName(c.employee_id) }));
   const soon = rows.filter(c => c.status === 'active' && c.end_date && dayDiff(c.end_date) >= 0 && dayDiff(c.end_date) <= 30);
-  $('view').innerHTML = `
+  return `<h2 class="sec" style="margin-top:24px">Hợp đồng lao động (${rows.length})</h2>
     ${soon.length ? `<div class="panel" style="margin-bottom:12px;border-color:#e8d3ae;background:#fffaf0">
       <b>Sắp hết hạn trong 30 ngày (${soon.length})</b>
       ${soon.map(c => `<div class="meta">• ${esc(c.emp)} — ${esc(CONTRACT_TYPES[c.type] || c.type)} hết hạn ${d(c.end_date)} (còn ${dayDiff(c.end_date)} ngày)</div>`).join('')}</div>` : ''}
@@ -766,7 +845,6 @@ function viewContracts() {
           <td>${money(c.base_salary)}</td>
           <td>${esc({ draft: 'Nháp', active: 'Hiệu lực', expired: 'Hết hạn', terminated: 'Đã chấm dứt' }[c.status])}</td></tr>`; }).join('')}</tbody></table>`
       : '<div class="empty">Chưa có hợp đồng nào.</div>'}`;
-  document.querySelectorAll('[data-con]').forEach(tr => tr.onclick = () => openContract(tr.dataset.con));
 }
 function openContract(id) {
   const c = state.contracts.find(x => x.id === id); if (!c) return;
@@ -786,34 +864,6 @@ const CRITERIA = [
   ['tuan_thu', 'Tuân thủ nội quy, giờ giấc']
 ];
 const RESULT_LABEL = { pass: 'Đạt — ký chính thức', extend: 'Gia hạn thử việc', fail: 'Không đạt' };
-function viewProbation() {
-  $('toolbar').innerHTML = `${searchBox('Tìm nhân sự...')}<span class="spacer"></span>
-    <button class="btn primary" id="btnAddRev">+ Đánh giá</button>${xlsxBar('probation')}`;
-  wireSearch();
-  $('btnAddRev').onclick = () => openReviewForm(null);
-  const probs = state.employees.filter(e => e.status === 'probation' && hit(e, ['full_name', 'title', 'department']));
-  const reviewed = (id) => state.reviews.filter(r => r.employee_id === id);
-  $('view').innerHTML = `
-    <h2 class="sec">Đang thử việc (${probs.length})</h2>
-    ${probs.length ? `<div class="cards">${probs.map(e => {
-      const rs = reviewed(e.id), last = rs[0];
-      const due = e.start_date ? addDays(e.start_date, 60) : null;
-      return `<div class="panel" data-rev-emp="${e.id}" style="cursor:pointer">
-        <h4>${esc(e.full_name)}</h4>
-        <div class="meta">${esc([e.title, e.level, e.department, e.business_unit].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
-        <div class="tags" style="margin-top:10px">
-          ${due ? `<span class="tag ${dayDiff(due) < 0 ? 'warn' : 'soon'}">hạn đánh giá ${d(due)}</span>` : ''}
-          ${last ? `<span class="tag ok">${last.total ?? '-'}/5 · ${esc(RESULT_LABEL[last.result] || 'chưa kết luận')}</span>` : '<span class="tag">chưa đánh giá</span>'}
-        </div></div>`; }).join('')}</div>` : '<div class="empty">Không có ai đang thử việc.</div>'}
-    <h2 class="sec" style="margin-top:22px">Lịch sử đánh giá (${state.reviews.length})</h2>
-    ${state.reviews.length ? `<table class="grid"><thead><tr><th>Nhân sự</th><th>Ngày</th><th>Người đánh giá</th><th>Điểm</th><th>Kết luận</th></tr></thead>
-      <tbody>${state.reviews.map(r => `<tr data-rev="${r.id}">
-        <td><b>${esc(empName(r.employee_id))}</b></td><td>${d(r.review_date)}</td><td>${esc(r.reviewer)}</td>
-        <td>${r.total ?? '-'}/5</td><td>${esc(RESULT_LABEL[r.result] || '')}</td></tr>`).join('')}</tbody></table>`
-      : '<div class="empty">Chưa có đánh giá nào.</div>'}`;
-  document.querySelectorAll('[data-rev-emp]').forEach(p => p.onclick = () => openReviewForm(null, p.dataset.revEmp));
-  document.querySelectorAll('[data-rev]').forEach(tr => tr.onclick = () => openReviewForm(tr.dataset.rev));
-}
 function openReviewForm(id, empId) {
   const r = id ? state.reviews.find(x => x.id === id) : null;
   const sc = r?.scores || {};
@@ -1128,7 +1178,7 @@ async function previewImport(entity, file) {
   const key = cfg.keyField;
   const existing = key ? (cfg.rows() || []) : [];
   const dup = key ? rows.filter(r => r[key] && existing.some(e => String(e[key] || '').toLowerCase() === String(r[key]).toLowerCase())) : [];
-  openModal(`Nhập Excel — ${cfg.label}`, `
+  openModal(`Nhập dữ liệu — ${cfg.label}`, `
     <p><b>${rows.length}</b> dòng hợp lệ · <b style="color:var(--danger)">${errors.length}</b> dòng lỗi${dup.length ? ` · <b>${dup.length}</b> dòng trùng (${key}) sẽ được cập nhật thay vì tạo mới` : ''}</p>
     ${errors.length ? `<div class="panel" style="max-height:200px;overflow:auto;margin-bottom:12px">
       ${errors.slice(0, 50).map(e => `<div class="meta">Dòng ${e.line}: ${esc(e.msgs.join('; '))}</div>`).join('')}
@@ -1155,9 +1205,9 @@ async function previewImport(entity, file) {
 function xlsxBar(entity) {
   const cfg = SHEETS[entity];
   return `<span class="spacer"></span>
-    <button class="btn sm" data-xl-tpl="${entity}" ${cfg.importable ? '' : 'style="display:none"'}>Tải mẫu Excel</button>
-    <button class="btn sm" data-xl-imp="${entity}" ${cfg.importable ? '' : 'style="display:none"'}>Nhập Excel</button>
-    <button class="btn sm" data-xl-exp="${entity}">Xuất Excel</button>`;
+    <button class="btn sm" data-xl-tpl="${entity}" ${cfg.importable ? '' : 'style="display:none"'}>Tải mẫu</button>
+    <button class="btn sm" data-xl-imp="${entity}" ${cfg.importable ? '' : 'style="display:none"'}>Nhập</button>
+    <button class="btn sm" data-xl-exp="${entity}">Xuất</button>`;
 }
 function wireXlsx() {
   document.querySelectorAll('[data-xl-tpl]').forEach(b => b.onclick = () => templateSheet(b.dataset.xlTpl).catch(e => toast(e.message, 6000)));
@@ -1269,26 +1319,104 @@ function openOffer(id) {
   $('oPdf').onclick = () => printLetter(o);
   $('oMail').onclick = () => composeEmail({ offer: o, templateKey: 'offer_letter' });
 }
-function printLetter(o) {
-  const { text } = offerLetterHTML(o);
+/* ---------- CHUẨN VĂN BẢN HÀNH CHÍNH - NHÂN SỰ HELIDIRECT ----------
+   Rút từ 2 mẫu gốc: HD_JD_* và HD_OfferLetter_*
+   Khổ Letter 8.5x11in · lề 0.97in trái/phải, 0.83in trên/dưới
+   Chữ Averta (fallback Avenir Next → Segoe UI → Inter → system)
+   Thân 10pt #444444 · gạch đầu dòng 10pt #000000 · tiêu đề mục 11pt đậm
+   Tiêu đề văn bản 22pt đậm IN HOA · dòng phụ 11pt đậm · dòng meta 9.5pt #444
+   Dòng kẻ #CCCCCC · header "HELIDIRECT LLC." + tên văn bản · footer "Confidential"
+------------------------------------------------------------------ */
+const HD_DOC_CSS = `
+@page { size: letter; margin: 21mm 24.6mm 21mm 24.6mm; }
+* { box-sizing: border-box; }
+body { font-family: Averta, "Avenir Next", "Segoe UI", Inter, -apple-system, system-ui, sans-serif;
+  font-size: 10pt; line-height: 1.6; color: #444444; margin: 0; }
+.hd-top { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 8.5pt; color: #888; border-bottom: 1px solid #CCCCCC; padding-bottom: 6px; margin-bottom: 22px; }
+.hd-top b { color: #000; letter-spacing: .6px; font-size: 9pt; }
+.hd-no { font-size: 9pt; font-weight: 700; color: #000; margin-bottom: 10px; }
+h1.hd-title { font-size: 22pt; font-weight: 700; color: #000; letter-spacing: .4px;
+  text-transform: uppercase; margin: 0 0 6px; line-height: 1.15; }
+.hd-sub { font-size: 11pt; font-weight: 700; color: #000; margin-bottom: 4px; }
+.hd-meta { font-size: 9.5pt; color: #444444; margin-bottom: 20px; }
+h2.hd-sec { font-size: 11pt; font-weight: 700; color: #000; margin: 22px 0 8px; }
+h2.hd-sec span { display: inline-block; min-width: 26px; color: #000; }
+.hd-body { white-space: pre-wrap; font: inherit; margin: 0; }
+.hd-body b, .hd-strong { color: #000; }
+ul.hd-list { list-style: none; padding: 0; margin: 0 0 10px; }
+ul.hd-list li { color: #000; margin-bottom: 5px; padding-left: 18px; text-indent: -18px; }
+ul.hd-list li::before { content: "—  "; color: #000; }
+table.hd-tb { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8px 0 14px; }
+table.hd-tb th, table.hd-tb td { border: 1px solid #CCCCCC; padding: 6px 9px; vertical-align: top; text-align: left; }
+table.hd-tb th { background: #F5F5F5; color: #000; font-weight: 700; }
+.hd-en { font-size: 8.5pt; color: #666; }
+.hd-sign { margin-top: 44px; display: flex; justify-content: space-between; }
+.hd-sign div { width: 45%; }
+.hd-rule { border: 0; border-top: 1px solid #CCCCCC; margin: 18px 0; }
+.hd-foot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8pt; color: #888;
+  border-top: 1px solid #CCCCCC; padding-top: 5px; }
+@media print { .noprint { display: none !important; } }
+.noprint { margin-top: 34px; text-align: center; }
+.noprint button { padding: 9px 20px; font: 13px/1 Inter, system-ui, sans-serif; cursor: pointer;
+  border: 1px solid #0f7a63; background: #0f7a63; color: #fff; border-radius: 6px; }`;
+
+function printDoc({ docName, docNo, title, subtitle, meta, bodyHTML }) {
   const w = window.open('', '_blank', 'width=900,height=1000');
   if (!w) return toast('Trình duyệt chặn cửa sổ in — cho phép popup rồi thử lại', 6000);
-  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Offer - ${esc(o.candidate_name)}</title>
-    <style>@page{size:A4;margin:22mm 20mm}
-      body{font:12.5pt/1.65 "Times New Roman",Georgia,serif;color:#111}
-      .hd{display:flex;justify-content:space-between;border-bottom:2px solid #0f7a63;padding-bottom:8px;margin-bottom:20px}
-      .hd b{font-size:17pt;letter-spacing:.5px;color:#0f7a63}
-      .meta{font-size:10pt;color:#555}
-      pre{white-space:pre-wrap;font:inherit;margin:0}
-      .sign{margin-top:46px}
-      @media print{.noprint{display:none}}</style></head>
-    <body><div class="hd"><b>${COMPANY}</b><span class="meta">Ngày ${new Date().toLocaleDateString('vi-VN')}</span></div>
-    <pre>${esc(text)}</pre>
-    <div class="noprint" style="margin-top:30px;text-align:center">
-      <button onclick="window.print()" style="padding:9px 18px;font:14px sans-serif;cursor:pointer">In / Lưu thành PDF</button></div>
+  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8">
+    <title>${esc(title)}</title><style>${HD_DOC_CSS}</style></head><body>
+    <div class="hd-top"><b>HELIDIRECT LLC.</b><span>${esc(docName || '')}</span></div>
+    ${docNo ? `<div class="hd-no">Số / No.: ${esc(docNo)}</div>` : ''}
+    <h1 class="hd-title">${esc(title)}</h1>
+    ${subtitle ? `<div class="hd-sub">${esc(subtitle)}</div>` : ''}
+    ${meta ? `<div class="hd-meta">${esc(meta)}</div>` : ''}
+    ${bodyHTML}
+    <div class="hd-foot">Confidential — HeliDirect LLC.</div>
+    <div class="noprint"><button onclick="window.print()">In / Lưu thành PDF</button></div>
     </body></html>`);
   w.document.close();
   setTimeout(() => { try { w.focus(); w.print(); } catch (e) { /* người dùng tự bấm nút */ } }, 500);
+}
+
+function printLetter(o) {
+  const { text } = offerLetterHTML(o);
+  printDoc({
+    docName: 'Thư mời nhận việc / Job Offer — ' + (o.position_title || ''),
+    docNo: 'JO……………………/HD-HRD',
+    title: 'Thư mời nhận việc  I  Job Offer',
+    subtitle: o.candidate_name || '',
+    meta: `HeliDirect LLC.  |  TP. Hồ Chí Minh, ngày ${new Date().toLocaleDateString('vi-VN')}  |  Tài liệu nội bộ`,
+    bodyHTML: `<pre class="hd-body">${esc(text)}</pre>`
+  });
+}
+
+function printJD(j) {
+  const li = (t) => String(t || '').split('\n').map(x => x.replace(/^[-–—•\s]+/, '').trim()).filter(Boolean)
+    .map(x => `<li>${esc(x)}</li>`).join('');
+  printDoc({
+    docName: 'Mô tả công việc — ' + (j.title || ''),
+    title: 'Mô tả công việc',
+    subtitle: [j.title, j.department].filter(Boolean).join('  |  '),
+    meta: `HeliDirect LLC.  |  Phiên bản v1 — ${new Date().toLocaleDateString('vi-VN')}  |  Tài liệu nội bộ`,
+    bodyHTML: `
+      <h2 class="hd-sec"><span>00</span>Thông tin vị trí</h2>
+      <table class="hd-tb"><tbody>
+        <tr><th style="width:32%">Chức danh</th><td>${esc(j.title)}</td></tr>
+        <tr><th>Phòng ban</th><td>${esc(j.department)}</td></tr>
+        <tr><th>Nơi làm việc</th><td>${esc(j.location)}</td></tr>
+        <tr><th>Loại hình</th><td>${esc(j.employment_type)}</td></tr>
+        <tr><th>Số lượng cần tuyển</th><td>${esc(j.headcount ?? 1)}</td></tr>
+        <tr><th>Dải lương</th><td>${esc(j.salary_range || '')}</td></tr>
+      </tbody></table>
+      ${j.jd_summary ? `<h2 class="hd-sec"><span>01</span>Mục tiêu vị trí</h2><div>${nl(j.jd_summary)}</div>` : ''}
+      ${j.jd_responsibilities ? `<h2 class="hd-sec"><span>02</span>Trách nhiệm chính</h2><ul class="hd-list">${li(j.jd_responsibilities)}</ul>` : ''}
+      ${j.jd_requirements ? `<h2 class="hd-sec"><span>03</span>Yêu cầu</h2><ul class="hd-list">${li(j.jd_requirements)}</ul>` : ''}
+      ${j.jd_benefits ? `<h2 class="hd-sec"><span>04</span>Quyền lợi</h2><ul class="hd-list">${li(j.jd_benefits)}</ul>` : ''}
+      <hr class="hd-rule">
+      <table class="hd-tb"><thead><tr><th>Người lập</th><th>Người phê duyệt</th><th>Người nhận việc</th></tr></thead>
+        <tbody><tr><td style="height:58px"></td><td></td><td></td></tr></tbody></table>`
+  });
 }
 
 /* --- soạn & gửi email --- */
@@ -1637,7 +1765,7 @@ function viewSettings() {
     <table class="grid"><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Gắn với hồ sơ nhân sự</th></tr></thead>
     <tbody>${state.profiles.map(p => `<tr>
       <td><b>${esc(p.email)}</b>${p.email === state.me ? ' <span class="tag">bạn</span>' : ''}</td>
-      <td><select data-role="${p.id}">${Object.entries(ROLE_LABEL).map(([k, v]) => `<option value="${k}" ${p.role === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
+      <td><select data-role="${p.id}">${state.roles.map(r => `<option value="${r.key}" ${p.role === r.key ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}</select></td>
       <td><select data-emp="${p.id}"><option value="">— chưa gắn —</option>
         ${state.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.full_name)}</option>`).join('')}</select></td>
     </tr>`).join('')}</tbody></table>
@@ -1645,6 +1773,7 @@ function viewSettings() {
       <div class="meta">• Người mới đăng nhập lần đầu mặc định là <b>Nhân viên</b>, HR vào đây nâng quyền.</div>
       <div class="meta">• Phải gắn tài khoản với hồ sơ nhân sự thì người đó mới tạo được đơn nghỉ và thấy hợp đồng của chính mình.</div>
       <div class="meta">• Lương và hợp đồng chỉ HR/Quản trị xem được; file hồ sơ (CCCD, HĐ scan) cũng vậy.</div></div>`;
+  renderRolePanel();
   renderBackupPanel();
   document.querySelectorAll('[data-role]').forEach(sel => sel.onchange = async () => {
     const { error } = await sb.from('profiles').update({ role: sel.value }).eq('id', sel.dataset.role);
@@ -1732,6 +1861,92 @@ async function openEmployeeDocs(empId) {
 }
 
 
+/* =================== 15. VAI TRÒ & MA TRẬN QUYỀN =================== */
+function renderRolePanel() {
+  if (!isHR()) return;
+  const used = (k) => state.profiles.filter(p => p.role === k).length;
+  $('view').insertAdjacentHTML('beforeend', `
+    <h2 class="sec" style="margin-top:24px">Vai trò & quyền hạn</h2>
+    <div class="panel">
+      <div class="meta">Mỗi vai trò dựa trên một <b>nhóm quyền gốc</b> (quyết định dữ liệu người đó đọc/ghi được ở tầng cơ sở dữ liệu),
+      cộng với ma trận quyền thao tác bên dưới. Vai trò hệ thống không xoá được.</div>
+      <div class="actions" style="justify-content:flex-start;margin:12px 0">
+        <button class="btn primary" id="rolNew">+ Vai trò mới</button>
+      </div>
+      <table class="grid"><thead><tr><th>Vai trò</th><th>Mã</th><th>Nhóm quyền gốc</th><th>Đang dùng</th><th>Quyền bật</th><th></th></tr></thead>
+        <tbody>${state.roles.map(r => {
+          const on = state.rolePerms.filter(x => x.role_key === r.key && x.allowed).length;
+          return `<tr>
+            <td><b>${esc(r.label)}</b>${r.is_system ? ' <span class="tag">hệ thống</span>' : ''}</td>
+            <td><span class="meta">${esc(r.key)}</span></td>
+            <td>${esc((ROLE_BASES.find(b => b[0] === r.base) || [, r.base])[1])}</td>
+            <td>${used(r.key)} tài khoản</td>
+            <td>${on}/${PERM_MODULES.length * PERM_ACTIONS.length}</td>
+            <td><button class="btn sm" data-rol-edit="${r.key}">Sửa quyền</button>
+              ${r.is_system ? '' : `<button class="btn sm danger" data-rol-del="${r.key}">Xoá</button>`}</td>
+          </tr>`; }).join('')}</tbody></table>
+    </div>`);
+  $('rolNew').onclick = () => formModal('Vai trò mới', [
+    { k: 'label', label: 'Tên vai trò *' },
+    { k: 'key', label: 'Mã (không dấu, không khoảng trắng) *' },
+    { k: 'base', label: 'Nhóm quyền gốc *', type: 'select', opts: ROLE_BASES },
+    { k: 'sort', label: 'Thứ tự hiển thị', type: 'number' }
+  ], { base: 'staff', sort: 50 }, async o => {
+    const key = String(o.key || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!o.label || !key) return toast('Cần tên và mã vai trò');
+    if (state.roles.some(r => r.key === key)) return toast('Mã vai trò đã tồn tại');
+    const { error } = await sb.from('roles').insert({ key, label: o.label, base: o.base, sort: Number(o.sort) || 50 });
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    const rows = [];
+    for (const [m] of PERM_MODULES) for (const [a] of PERM_ACTIONS) rows.push({ role_key: key, module: m, action: a, allowed: false });
+    await sb.from('role_perms').insert(rows);
+    closeAll(); await loadAll(); render(); toast('Đã tạo vai trò');
+  });
+  document.querySelectorAll('[data-rol-edit]').forEach(b => b.onclick = () => openRolePerms(b.dataset.rolEdit));
+  document.querySelectorAll('[data-rol-del]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.rolDel;
+    if (state.profiles.some(p => p.role === k)) return toast('Còn tài khoản đang dùng vai trò này', 5000);
+    if (!confirm('Xoá vai trò "' + roleLabel(k) + '"? Không khôi phục được.')) return;
+    const { error } = await sb.from('roles').delete().eq('key', k);
+    if (error) return toast('Lỗi xoá: ' + error.message, 6000);
+    await loadAll(); render(); toast('Đã xoá vai trò');
+  });
+}
+
+function openRolePerms(key) {
+  const r = state.roles.find(x => x.key === key); if (!r) return;
+  const val = (m, a) => {
+    const x = state.rolePerms.find(p => p.role_key === key && p.module === m && p.action === a);
+    return !!(x && x.allowed);
+  };
+  const locked = r.key === 'admin';
+  openDrawer('Quyền của vai trò — ' + r.label, `
+    <div class="meta">Nhóm quyền gốc: <b>${esc((ROLE_BASES.find(b => b[0] === r.base) || [, r.base])[1])}</b>
+      — quyết định phạm vi dữ liệu ở tầng cơ sở dữ liệu. Ma trận dưới đây quyết định thao tác trong app.</div>
+    ${locked ? '<div class="meta" style="margin-top:8px"><b>Quản trị luôn có toàn quyền, không chỉnh được.</b></div>' : ''}
+    <table class="grid" style="margin-top:12px"><thead><tr><th>Nhóm chức năng</th>
+      ${PERM_ACTIONS.map(([, l]) => `<th style="text-align:center">${l}</th>`).join('')}</tr></thead>
+      <tbody>${PERM_MODULES.map(([m, ml]) => `<tr><td><b>${ml}</b></td>
+        ${PERM_ACTIONS.map(([a]) => `<td style="text-align:center">
+          <input type="checkbox" data-pm="${m}" data-pa="${a}" ${val(m, a) ? 'checked' : ''} ${locked ? 'disabled' : ''}></td>`).join('')}
+      </tr>`).join('')}</tbody></table>
+    ${locked ? '' : `<div class="actions" style="margin-top:14px">
+      <button class="btn" id="rpAllOff">Bỏ chọn hết</button>
+      <button class="btn" id="rpAllOn">Chọn hết</button>
+      <button class="btn primary" id="rpSave">Lưu quyền</button></div>`}`);
+  if (locked) return;
+  $('rpAllOn').onclick = () => document.querySelectorAll('[data-pm]').forEach(c => c.checked = true);
+  $('rpAllOff').onclick = () => document.querySelectorAll('[data-pm]').forEach(c => c.checked = false);
+  $('rpSave').onclick = async () => {
+    const rows = [...document.querySelectorAll('[data-pm]')].map(c => ({
+      role_key: key, module: c.dataset.pm, action: c.dataset.pa, allowed: c.checked
+    }));
+    const { error } = await sb.from('role_perms').upsert(rows, { onConflict: 'role_key,module,action' });
+    if (error) return toast('Lỗi lưu quyền: ' + error.message, 6000);
+    closeAll(); await loadAll(); render(); toast('Đã lưu quyền vai trò');
+  };
+}
+
 /* =================== 14. SAO LƯU DỮ LIỆU =================== */
 async function renderBackupPanel() {
   if (!isHR()) return;
@@ -1774,7 +1989,7 @@ async function renderBackupPanel() {
 }
 
 /* =================== 15. SONG NGỮ VI / EN =================== */
-const I18N_EN = {"(chưa gán nhân sự)":"(no employee assigned)","(hiện dấu \"…\", sửa tay trước khi gửi)":"(shows \"…\", edit manually before sending)","), điền tay giúp bạn nhé":"), please fill in manually","+ Hợp đồng":"+ Contract","+ Nhân sự":"+ Employee","+ Vị trí":"+ Job","+ Đánh giá":"+ Review","+ Đơn nghỉ":"+ Leave request","+ Ứng viên":"+ Candidate",", HR vào đây nâng quyền.":", HR can upgrade permissions here.",", kiểm tra lại trước khi lưu":", check again before saving",". Mở mail và bấm vào link.":". Open the email and click the link.","13 tháng lương":"13th-month salary","15 triệu":"15 million","<button class=\"btn\" id=\"eDocs\">Hồ sơ & giấy tờ</button>":"<button class=\"btn\" id=\"eDocs\">Records & documents</button>","<button class=\"btn\" id=\"lvBal\">Hạn mức phép</button>":"<button class=\"btn\" id=\"lvBal\">Leave balance</button>","<div class=\"actions\"><button class=\"btn danger\" id=\"rDel\">Xoá đánh giá</button></div>":"<div class=\"actions\"><button class=\"btn danger\" id=\"rDel\">Delete review</button></div>","<div class=\"actions\"><button class=\"btn\" id=\"tClose\">Đóng</button></div>":"<div class=\"actions\"><button class=\"btn\" id=\"tClose\">Close</button></div>","<div class=\"empty\">Chưa có bản sao lưu nào — bấm \"Chụp bản sao lưu ngay\".</div>":"<div class=\"empty\">No backups yet — click \"Take backup now\".</div>","<div class=\"empty\">Chưa có dữ liệu</div>":"<div class=\"empty\">No data yet</div>","<div class=\"empty\">Chưa có giấy tờ nào</div>":"<div class=\"empty\">No documents yet</div>","<div class=\"empty\">Chưa có hoạt động</div>":"<div class=\"empty\">No activity yet</div>","<div class=\"empty\">Chưa có hợp đồng nào.</div>":"<div class=\"empty\">No contracts yet.</div>","<div class=\"empty\">Chưa có hợp đồng</div>":"<div class=\"empty\">No contracts yet</div>","<div class=\"empty\">Chưa có nhân sự nào.</div>":"<div class=\"empty\">No employees yet.</div>","<div class=\"empty\">Chưa có nhân sự, hoặc mọi người đều có quản lý (vòng lặp). Thêm nhân sự ở tab Danh bạ.</div>":"<div class=\"empty\">No employees yet, or everyone has a manager (loop). Add employees in the Directory tab.</div>","<div class=\"empty\">Chưa có nhân sự.</div>":"<div class=\"empty\">No employees yet.</div>","<div class=\"empty\">Chưa có offer nào. Mở hồ sơ ứng viên → \"Tạo offer\", hoặc bấm \"+ Offer\".</div>":"<div class=\"empty\">No offers yet. Open a candidate profile → \"Create offer\", or click \"+ Offer\".</div>","<div class=\"empty\">Chưa có vị trí nào. Bấm \"+ Vị trí\" để thêm.</div>":"<div class=\"empty\">No jobs yet. Click \"+ Job\" to add one.</div>","<div class=\"empty\">Chưa có đánh giá nào.</div>":"<div class=\"empty\">No reviews yet.</div>","<div class=\"empty\">Chưa có đánh giá</div>":"<div class=\"empty\">No reviews yet</div>","<div class=\"empty\">Chưa có đơn nghỉ nào.</div>":"<div class=\"empty\">No leave requests yet.</div>","<div class=\"empty\">Chưa có ứng viên</div>":"<div class=\"empty\">No candidates yet</div>","<div class=\"empty\">Chưa gửi email nào từ app.</div>":"<div class=\"empty\">No emails sent from the app yet.</div>","<div class=\"empty\">Chưa gửi lần nào</div>":"<div class=\"empty\">Never sent</div>","<div class=\"empty\">Chưa áp dụng mẫu onboarding</div>":"<div class=\"empty\">No onboarding template applied</div>","<div class=\"empty\">Không có ai đang thử việc.</div>":"<div class=\"empty\">No one is on probation.</div>","<div class=\"panel\" style=\"margin-bottom:14px\"><b>Không có việc nào quá hạn.</b> <span class=\"meta\">Hệ thống tự quét mỗi sáng 8h.</span></div>":"<div class=\"panel\" style=\"margin-bottom:14px\"><b>No overdue tasks.</b> <span class=\"meta\">The system scans every morning at 8:00.</span></div>","<div class=\"tags\" style=\"margin-top:10px\"><span class=\"tag soon\">chưa có checklist</span></div>":"<div class=\"tags\" style=\"margin-top:10px\"><span class=\"tag soon\">no checklist yet</span></div>","<p class=\"empty\">Đang tải...</p>":"<p class=\"empty\">Loading...</p>","<span class=\"meta\">không xác định</span>":"<span class=\"meta\">unknown</span>","<span class=\"tag ok\">có JD</span>":"<span class=\"tag ok\">has JD</span>","<span class=\"tag warn\">thiếu JD</span>":"<span class=\"tag warn\">missing JD</span>","<span class=\"tag\">bạn</span>":"<span class=\"tag\">you</span>","<span class=\"tag\">chưa đánh giá</span>":"<span class=\"tag\">not reviewed</span>","? Không khôi phục được.":"? Unable to restore.","Bảng điều hành":"Dashboard","Bắt đầu":"Start","Bằng cấp / chứng chỉ":"Degrees / certificates","Chuyên môn / chất lượng công việc":"Expertise / work quality","Chuyển vòng:":"Move stage:","Chính thức":"Active","Chưa có bản sao lưu nào — bấm \"Chụp bản sao lưu ngay\".":"No backups yet — click \"Take backup now\".","Chưa có checklist. Chọn mẫu để tạo:":"No checklist yet. Choose a template to create one:","Chưa có dữ liệu":"No data yet","Chưa có dữ liệu để xuất":"No data to export","Chưa có giấy tờ nào":"No documents yet","Chưa có hoạt động":"No activity yet","Chưa có hợp đồng":"No contracts yet","Chưa có hợp đồng nào.":"No contracts yet.","Chưa có nhân sự nào.":"No employees yet.","Chưa có nhân sự.":"No employees yet.","Chưa có offer nào. Mở hồ sơ ứng viên → \"Tạo offer\", hoặc bấm \"+ Offer\".":"No offers yet. Open a candidate profile → \"Create offer\", or click \"+ Offer\".","Chưa có thông tin":"No information yet","Chưa có tiêu đề":"No title yet","Chưa có vị trí nào. Bấm \"+ Vị trí\" để thêm.":"No jobs yet. Click \"+ Job\" to add one.","Chưa có đánh giá":"No reviews yet","Chưa có đánh giá nào.":"No reviews yet.","Chưa có đơn nghỉ nào.":"No leave requests yet.","Chưa có ứng viên":"No candidates yet","Chưa gán":"Unassigned","Chưa gắn hồ sơ nhân sự cho tài khoản này":"No employee profile linked to this account","Chưa gửi email nào từ app.":"No emails sent from the app yet.","Chưa gửi lần nào":"Never sent","Chưa rõ":"Unknown","Chưa rõ vị trí hiện tại":"Current job unknown","Chưa áp dụng mẫu onboarding":"No onboarding template applied","Chạy kiểm tra toàn bộ chức năng":"Run full system test","Chọn file & tải lên":"Choose file & upload","Chọn ngày bắt đầu và kết thúc":"Select start and end dates","Chọn nhân sự":"Select employee","Chỗ ở hiện tại":"Current residence","Chờ duyệt":"Pending approval","Chờ phản hồi":"Awaiting response","Chụp bản sao lưu ngay":"Take backup now","Chức danh":"Job title","Chức danh hiện tại":"Current job title","Chức vụ người ký":"Signatory's title","Còn thiếu thông tin:":"Missing information:","Có":"Yes","Có / Không":"Yes / No","Công ty hiện tại":"Current company","Cấp bậc":"Level","Cần cải thiện":"Needs improvement","Cần nhập họ tên":"Full name required","Cần nhập tên vị trí":"Job name required","Cần tên ứng viên và vị trí":"Candidate name and job required","Cột có dấu * là bắt buộc.":"Columns marked * are required.","Danh bạ nhân sự":"People directory","Duyệt":"Approve","Dòng mẫu ở sheet đầu chỉ để tham khảo — xoá đi trước khi nhập.":"The sample row in the first sheet is for reference only — delete it before importing.","Dải lương":"Salary range","Email công ty":"Company email","Email người nhận chưa hợp lệ":"Recipient email is invalid","Email này chưa được phép dùng hệ thống. Chỉ email công ty (@helidirect.com) đăng nhập được — liên hệ phòng Nhân sự nếu cần mở thêm.":"This email is not yet authorized to use the system. Only company emails (@helidirect.com) can sign in — contact HR if more access is needed.","Email đã soạn":"Drafted email","Email ứng viên":"Candidate email","File này giống mô tả công việc hơn là CV — kiểm tra lại giúp bạn nhé":"This file looks more like a job description than a CV — please double-check","File quá 15MB":"File exceeds 15MB","Ghi chú":"Notes","Ghi chú khác":"Other notes","Ghi chú nội bộ":"Internal notes","Gia hạn thử việc":"Extend probation","Giá trị cho phép:":"Allowed values:","Giám đốc":"Director","Giấy khám sức khoẻ":"Health certificate","Giấy tờ BHXH":"Social insurance documents","Giới tính":"Gender","Gắn với hồ sơ nhân sự":"Link to employee profile","Gửi email":"Send email","Gửi link đăng nhập":"Send login link","Gửi lỗi:":"Send error:","Gửi ngay":"Send now","Gửi ngay (":"Send now (","Gửi tới *":"Send to *","Hiện ứng viên đã loại / rút":"Show rejected / withdrawn candidates","Hiệu lực":"Effective","Hiệu lực từ":"Effective from","Hiệu lực từ (yyyy-mm-dd)":"Effective from (yyyy-mm-dd)","Huỷ":"Cancel","HĐ hết hạn ≤30 ngày":"Contracts expiring ≤30 days","Hướng dẫn nhập liệu":"Data entry guide","Hạn":"Due","Hạn hiệu lực (nếu có)":"Expiry date (if any)","Hạn mức phép":"Leave balance","Hạn mức phép năm":"Annual leave balance","Hạn phản hồi":"Response deadline","Hạn tuyển xong":"Hiring deadline","Hạn tuyển xong (yyyy-mm-dd)":"Hiring deadline (yyyy-mm-dd)","Hết hạn":"Expired","Hết hạn (trống = không xác định)":"Expiry (blank = unspecified)","Hết hạn (yyyy-mm-dd)":"Expiry (yyyy-mm-dd)","Hệ thống chỉ gửi được vài email đăng nhập mỗi giờ. Đợi ít phút rồi thử lại, hoặc nhờ HR gửi lại sau.":"The system can only send a few login emails per hour. Wait a few minutes and retry, or ask HR to resend later.","Hệ thống tự quét mỗi sáng 8h.":"The system scans every morning at 8:00.","Họ tên":"Full name","Họ tên *":"Full name *","Hồ sơ & giấy tờ":"Records & documents","Hồ sơ & giấy tờ —":"Records & documents —","Hộ khẩu thường trú":"Permanent residence registration","Hợp đồng":"Contract","Hợp đồng đã ký":"Signed contract","Hợp đồng —":"Contract —","In / Lưu PDF":"Print / Save PDF","In / Lưu thành PDF":"Print / Save as PDF","Khác":"Other","Không":"No","Không có ai đang thử việc.":"No one is on probation.","Không có việc nào quá hạn.":"No overdue tasks.","Không tải được thư viện Excel (kiểm tra mạng)":"Could not load the Excel library (check your network)","Không xác định thời hạn":"Indefinite term","Không đạt":"Failed","Không đọc được file:":"Cannot read file:","Không đọc được nội dung CV, nhập tay giúp bạn nhé":"Cannot read CV content, please enter manually","Không đổi được vòng:":"Cannot change stage:","Kiểm tra hệ thống":"System check","Kênh":"Channel","Kết luận":"Conclusion","Kỹ năng (cách nhau bằng dấu phẩy)":"Skills (comma-separated)","Kỹ năng (phẩy)":"Skills (comma)","Liên hệ khẩn cấp":"Emergency contact","Loại":"Type","Loại giấy tờ":"Document type","Loại hình":"Employment type","Loại hình:":"Employment type:","Loại hợp đồng":"Contract type","Loại nghỉ":"Leave type","Loại ứng viên":"Candidate type","Làm mới":"Refresh","Lý do":"Reason","Lý do từ chối (không bắt buộc):":"Rejection reason (optional):","Lưu":"Save","Lưu ghi chú":"Save note","Lưu hồ sơ":"Save profile","Lưu hồ sơ OK nhưng upload CV lỗi:":"Profile saved, but CV upload failed:","Lưu ý":"Note","Lương":"Salary","Lương CB":"Base pay","Lương chính thức (gross, VNĐ)":"Official salary (gross, VND)","Lương cơ bản":"Base salary","Lương cơ bản (VND)":"Base salary (VND)","Lương thử việc (%)":"Probation salary (%)","Lịch sử":"History","Lỗi":"Error","Lỗi lưu offer:":"Error saving offer:","Lỗi lưu:":"Save error:","Lỗi sao lưu:":"Backup error:","Lỗi tải dữ liệu:":"Data load error:","Lỗi xoá:":"Delete error:","Lỗi:":"Error:","Mã nhân viên":"Employee ID","Mã số thuế cá nhân":"Personal tax code","Mô tả chung":"General description","Mẫu":"Template","Mẫu checklist":"Checklist template","Mẫu này chưa có việc nào":"This template has no tasks yet","Mẫu onboarding":"Onboarding template","Mẫu thư":"Email template","Mốc ngày bắt đầu":"Start date anchor","Mở":"Open","Mở Gmail OK nhưng ghi log lỗi:":"Gmail opened, but logging failed:","Mở lại":"Reopen","Mở trong Gmail":"Open in Gmail","Mức lương:":"Salary:","Nghỉ phép":"Leave","Nguồn":"Source","Nguồn ứng viên":"Candidate source","Ngành hàng / BU":"Business unit","Ngày":"Date","Ngày bắt đầu":"Start date","Ngày cấp":"Issue date","Ngày ghi dạng yyyy-mm-dd hoặc dd/mm/yyyy.":"Dates in yyyy-mm-dd or dd/mm/yyyy format.","Ngày ký":"Signing date","Ngày ký (yyyy-mm-dd)":"Signing date (yyyy-mm-dd)","Ngày kết thúc phải sau ngày bắt đầu":"End date must be after start date","Ngày sinh":"Date of birth","Ngày vào làm":"Join date","Ngày vào làm (yyyy-mm-dd)":"Join date (yyyy-mm-dd)","Ngày đánh giá":"Review date","Ngân hàng":"Bank","Người duyệt":"Approver","Người ký":"Signatory","Người nhận":"Recipient","Người đánh giá":"Reviewer","Nháp":"Draft","Nhân sự":"Employees","Nhân sự (HR)":"Employees (HR)","Nhân sự (họ tên) *":"Employee (full name) *","Nhân sự *":"Employee *","Nhân sự theo phòng ban":"Employees by department","Nhân sự đang làm":"Active employees","Nhân viên":"Employee","Nhận xét phỏng vấn, mức lương mong muốn...":"Interview notes, desired salary...","Nhập Excel":"Import Excel","Nơi cấp":"Place of issue","Nơi làm việc":"Workplace","Nơi làm việc:":"Workplace:","Nội dung":"Content","Nữ":"Female","Offer chờ phản hồi":"Offers awaiting response","Parse lỗi (":"Parse error (","Phân quyền":"Roles & permissions","Phép năm (ngày)":"Annual leave (days)","Phòng ban":"Department","Phối hợp & giao tiếp":"Collaboration & communication","Phụ cấp":"Allowance","Phụ trách":"In charge","QUYỀN LỢI":"BENEFITS","Quyền lợi":"Benefits","Quyền lợi (mỗi dòng 1 ý)":"Benefits (one per line)","Quét nhắc việc ngay":"Scan reminders now","Quản lý":"Manager","Quản lý trực tiếp":"Direct manager","Quản lý trực tiếp (họ tên)":"Direct manager (full name)","Quản lý tuyển dụng":"Hiring manager","Quản trị (toàn quyền)":"Admin (full access)","Sao chép JD":"Copy JD","Sao lưu dữ liệu":"Data backup","Soạn email":"Compose email","Sơ yếu lý lịch":"Resume","Sơ đồ dựng tự động từ cột \"Quản lý trực tiếp\" trong Danh bạ nhân sự.":"Chart auto-built from the \"Direct manager\" column in the People directory.","Sơ đồ tổ chức":"Org chart","Số CCCD/CMND":"ID number (CCCD/CMND)","Số HĐ":"Contract no.","Số hợp đồng":"Contract number","Số liệu cập nhật theo thời gian thực từ dữ liệu đang dùng.":"Figures update in real time from live data.","Số lượng":"Quantity","Số lượng cần tuyển":"Headcount","Số lượng:":"Quantity:","Số ngày":"Days","Số ngày (tự tính, sửa được)":"Days (auto-calculated, editable)","Số người phụ thuộc":"Number of dependents","Số năm kinh nghiệm":"Years of experience","Số sổ BHXH":"Social insurance book no.","Số tài khoản":"Account number","Sửa":"Edit","Sửa mẫu —":"Edit template —","Sửa offer":"Edit offer","Sửa đánh giá thử việc":"Edit probation review","Sửa đơn nghỉ":"Edit leave request","TP. Hồ Chí Minh":"Ho Chi Minh City","TRÁCH NHIỆM CHÍNH":"KEY RESPONSIBILITIES","Thiếu dữ liệu:":"Missing data:","Thoát":"Sign out","Thành thạo tiếng Việt":"Fluent in Vietnamese","Thái độ, tinh thần trách nhiệm":"Attitude and sense of responsibility","Thêm ghi chú":"Add note","Thêm hợp đồng":"Add contract","Thêm nhân sự":"Add employee","Thêm vị trí":"Add job","Thêm ứng viên":"Add candidate","Thư & Email":"Mail & Email","Thời gian":"Time","Thời gian làm việc":"Working hours","Thời gian tuyển TB":"Avg. time to hire","Thời vụ":"Seasonal","Thời vụ / dịch vụ":"Seasonal / service","Thời điểm":"Timing","Thứ 2 - Thứ 6, 8h30 - 17h30":"Mon - Fri, 8:30 - 17:30","Thử việc":"Probation","Thử việc (tháng)":"Probation (months)","Thực tập":"Internship","Tiêu đề":"Title","Tiến độ & khối lượng hoàn thành":"Progress & workload completed","Trách nhiệm chính":"Key responsibilities","Trách nhiệm chính (mỗi dòng 1 ý)":"Key responsibilities (one per line)","Trình duyệt chặn cửa sổ in — cho phép popup rồi thử lại":"Browser blocked the print window — allow popups and retry","Trạng thái":"Status","Tuyển dụng":"Recruiting","Tuân thủ nội quy, giờ giấc":"Compliance with rules and punctuality","Tài khoản":"Account","Tài khoản của bạn chưa gắn với hồ sơ nhân sự nào — HR vào tab":"Your account is not linked to any employee profile — HR go to the tab","Tên mẫu":"Template name","Tên vị trí *":"Job name *","Tên ứng viên *":"Candidate name *","Tìm nhân sự...":"Search employees...","Tìm theo nhân sự, số HĐ...":"Search by employee, contract no....","Tìm theo tên ứng viên, email...":"Search by candidate name, email...","Tìm theo tên, lý do...":"Search by name, reason...","Tìm tên, chức danh, phòng ban, email...":"Search name, job title, department, email...","Tìm tên, email, skill, công ty...":"Search name, email, skill, company...","Tìm vị trí, phòng ban...":"Search job, department...","Tạo hồ sơ":"Create profile","Tạo offer":"Create offer","Tạo offer letter":"Create offer letter","Tạo đơn nghỉ":"Create leave request","Tải CV lên":"Upload CV","Tải bản mới nhất (.json)":"Download latest (.json)","Tải mẫu Excel":"Download Excel template","Tải về":"Download","Tất cả vị trí":"All jobs","Tỉ lệ nhận offer":"Offer acceptance rate","Tổng số dòng":"Total rows","Từ":"From","Từ chối":"Reject","Từ ngày":"From date","Từ ngày *":"From date *","Upload lỗi:":"Upload error:","Vai trò":"Role","Viết nội dung social":"Write social content","Việc cần làm":"To-dos","Vòng":"Stage","Vị trí":"Job","Vị trí & JD":"Jobs & JD","Vị trí *":"Job *","Vị trí tuyển dụng":"Job opening","Vị trí đang tuyển":"Open jobs","Vị trí ứng tuyển":"Applied job","Vị trí ứng tuyển (tên)":"Applied job (name)","Xem trước 5 dòng đầu.":"Preview of first 5 rows.","Xoá":"Delete","Xoá checklist":"Delete checklist","Xoá giấy tờ này?":"Delete this document?","Xoá toàn bộ checklist của":"Delete the entire checklist of","Xoá đánh giá":"Delete review","Xuất Excel":"Export Excel","Xác định 12 tháng":"Fixed-term 12 months","Xác định 24 tháng":"Fixed-term 24 months","YÊU CẦU":"REQUIREMENTS","Yêu cầu":"Requirements","Yêu cầu (mỗi dòng 1 ý)":"Requirements (one per line)","\nMÔ TẢ":"\nDESCRIPTION","bạn":"you","chưa có checklist":"no checklist yet","chưa kết luận":"no conclusion yet","chưa đánh giá":"not reviewed","có JD":"has JD","dòng hợp lệ ·":"valid rows ·","hôm nay":"today","hợp đồng này":"this contract","không bắt buộc":"optional","không thời hạn":"indefinite","không xác định":"unknown","lỗi không rõ":"unknown error","ngày":"days","nhân sự":"employees","offer của":"offer for","phải trùng tên đã có trong app":"must match an existing name in the app","quy tắc":"rules","theo chính sách công ty":"per company policy","thiếu JD":"missing JD","thiếu cột bắt buộc:":"missing required columns:","việc":"tasks","vòng lặp quản lý — kiểm tra lại":"management loop — please check","vị trí":"jobs","· hạn":"· due","· quá hạn":"· overdue","· vào":"· joined","Áp dụng mẫu":"Apply template","Đang chuẩn bị file...":"Preparing file...","Đang thử việc":"On probation","Đang tuyển":"Hiring","Đang tuyển (Có/Không)":"Hiring (Yes/No)","Đang tải...":"Loading...","Đang đọc":"Reading","Điểm":"Score","Điểm mạnh":"Strengths","Điểm trung bình":"Average score","Điện thoại":"Phone","Đánh giá thử việc":"Probation review","Đã chấm dứt":"Terminated","Đã copy JD vào clipboard":"JD copied to clipboard","Đã cập nhật đơn":"Request updated","Đã duyệt":"Approved","Đã duyệt đơn":"Request approved","Đã dùng":"Used","Đã gắn hồ sơ nhân sự":"Employee profile linked","Đã gửi":"Sent","Đã gửi email tới":"Email sent to","Đã gửi link tới":"Link sent to","Đã gửi đơn nghỉ, chờ duyệt":"Leave request submitted, awaiting approval","Đã huỷ":"Cancelled","Đã làm mới":"Refreshed","Đã lưu":"Saved","Đã lưu hạn mức phép":"Leave balance saved","Đã lưu hồ sơ cá nhân":"Personal profile saved","Đã lưu mẫu":"Template saved","Đã lưu đánh giá":"Review saved","Đã mở Gmail":"Gmail opened","Đã mở Gmail và ghi vào lịch sử":"Gmail opened and logged to history","Đã nghỉ":"Resigned","Đã quét lại việc cần nhắc":"Reminders rescanned","Đã rút thông tin bằng":"Extracted info using","Đã thêm":"Added","Đã thêm ghi chú":"Note added","Đã thêm hợp đồng":"Contract added","Đã thêm nhân sự":"Employee added","Đã thêm vị trí":"Job added","Đã tạo":"Created","Đã tải file mẫu":"Template file downloaded","Đã tải file sao lưu — cất vào Drive giúp bạn nhé":"Backup file downloaded — please store it in Drive","Đã tải lên":"Uploaded","Đã từ chối đơn":"Request rejected","Đã xong (Có/Không)":"Done (Yes/No)","Đã xoá":"Deleted","Đã xoá checklist":"Checklist deleted","Đã xử lý":"Processed","Đã đóng":"Closed","Đã đổi vai trò":"Role changed","Đóng":"Close","Đơn của tôi chờ duyệt":"My requests pending approval","Đơn nghỉ chờ duyệt":"Leave requests pending approval","Đơn nghỉ phép":"Leave request","Đạt — ký chính thức":"Passed — sign as official","Đến":"To","Đến ngày":"To date","Đến ngày *":"To date *","Đồng ý":"Agree","Đổi trạng thái:":"Change status:","đánh giá này":"this review","đã loại":"rejected","đã rút":"withdrawn","để gắn, khi đó mới tạo được đơn nghỉ cho chính mình.":"to link, then you can create leave requests for yourself.","Ứng viên":"Candidate","Ứng viên theo vòng":"Candidates by stage","Ứng viên từ chối":"Candidates who declined","Ứng viên đang xử lý":"Candidates in process","Ứng viên đồng ý":"Candidates who accepted","— chưa gán —":"— unassigned —","— chưa gắn —":"— not linked —","— chưa kết luận —":"— no conclusion —","— chọn —":"— select —","— các chỗ này hiện dấu \"…\" trong thư.":"— these spots show \"…\" in the email.","— không có —":"— none —","• Người mới đăng nhập lần đầu mặc định là":"• New users signing in for the first time default to","Ai được xem gì: HR/Quản trị thấy toàn bộ · Quản lý thấy tuyển dụng, đội của mình · Nhân viên chỉ thấy danh bạ, onboarding và nghỉ phép của mình.":"Who sees what: HR/Admin see everything · Managers see recruiting and their own team · Staff see only the directory, onboarding and their own leave.","Chưa có nhân sự, hoặc mọi người đều có quản lý (vòng lặp). Thêm nhân sự ở tab Danh bạ.":"No employees yet, or everyone has a manager (a loop). Add employees in the People directory tab.","Gmail mở sẵn thư đã điền; bấm Gửi trong Gmail là xong. Thư sẽ nằm trong hộp Sent của bạn.":"Gmail opens with the message pre-filled; just click Send in Gmail. A copy stays in your Sent folder.","Hệ thống tự chụp toàn bộ dữ liệu mỗi ngày lúc 2h10 sáng và giữ 31 bản gần nhất (mỗi ngày trong tháng một bản). Bấm \"Tải về\" để giữ thêm một bản ngoài hệ thống — nên làm mỗi tháng một lần.":"The system snapshots all data every day at 2:10 AM and keeps the 31 most recent copies (one per day of the month). Click \"Download\" to keep an extra copy outside the system — once a month is enough.","Đăng nhập bằng email công ty (@helidirect.com). Hệ thống gửi link đăng nhập dùng 1 lần.":"Sign in with your company email (@helidirect.com). We send a one-time sign-in link.","• Lương và hợp đồng chỉ HR/Quản trị xem được; file hồ sơ (CCCD, HĐ scan) cũng vậy.":"• Salary and contracts are visible to HR/Admin only; so are personal files (ID card, scanned contracts).","• Phải gắn tài khoản với hồ sơ nhân sự thì người đó mới tạo được đơn nghỉ và thấy hợp đồng của chính mình.":"• An account must be linked to an employee record before that person can file leave or see their own contract.","\" chỉ nhận:":"\" only accepts:","\" không hợp lệ":"\" is invalid","\" phải là số, đang là \"":"\" must be a number, currently \"","\" sai định dạng, cần yyyy-mm-dd":"\" has wrong format, expected yyyy-mm-dd","(còn":"(remaining","(ngày":"(days",") sẽ được cập nhật thay vì tạo mới":") will be updated instead of created",", cập nhật":", updated",", phòng":", departments","... và":"... and","Biến dùng được:":"Available variables:","Chờ bạn duyệt (":"Awaiting your approval (","Dòng":"Row","Email đã soạn (":"Drafted emails (","Giấy tờ đính kèm (":"Attached documents (","Hợp đồng (":"Contracts (","Lịch sử email (":"Email history (","Lịch sử đánh giá (":"Review history (","Lỗi ở dòng \"":"Error on row \"","Mở CV (":"Open CV (","Nhập":"Import","Nhập Excel —":"Import Excel —","Phép năm còn lại (":"Annual leave remaining (","Sắp hết hạn trong 30 ngày (":"Expiring within 30 days (","Tiêu đề:":"Subject:","Việc cần xử lý (":"Tasks to handle (","bắt đầu":"start","dòng":"rows","dòng (":"rows (","dòng lỗi":"error rows","dòng mới":"new rows","dòng nữa":"more rows","dòng trùng (":"duplicate rows (","hạn đánh giá":"review due","hết hạn":"expired","không tìm thấy nhân sự \"":"employee not found \"","không tìm thấy vị trí \"":"job not found \"","ngày \"":"date \"","ngày)":"days)","quá hạn":"overdue","thiếu \"":"missing \"","việc xong":"tasks done","vòng \"":"stage \"","Đang thử việc (":"On probation (","Đánh giá thử việc (":"Probation reviews (","Đã nhập:":"Imported:","Đã sao lưu":"Backed up","Đã xuất":"Exported","Đơn nghỉ (":"Leave requests (","đã tuyển":"hired","Ứng viên (":"Candidates (","ứng viên":"candidates"};
+const I18N_EN = {"(chưa gán nhân sự)":"(no employee assigned)","(hiện dấu \"…\", sửa tay trước khi gửi)":"(shows \"…\", edit manually before sending)","), điền tay giúp bạn nhé":"), please fill in manually","+ Hợp đồng":"+ Contract","+ Nhân sự":"+ Employee","+ Vị trí":"+ Job","+ Đánh giá":"+ Review","+ Đơn nghỉ":"+ Leave request","+ Ứng viên":"+ Candidate",", HR vào đây nâng quyền.":", HR can upgrade permissions here.",", kiểm tra lại trước khi lưu":", check again before saving",". Mở mail và bấm vào link.":". Open the email and click the link.","13 tháng lương":"13th-month salary","15 triệu":"15 million","<button class=\"btn\" id=\"eDocs\">Hồ sơ & giấy tờ</button>":"<button class=\"btn\" id=\"eDocs\">Records & documents</button>","<button class=\"btn\" id=\"lvBal\">Hạn mức phép</button>":"<button class=\"btn\" id=\"lvBal\">Leave balance</button>","<div class=\"actions\"><button class=\"btn danger\" id=\"rDel\">Xoá đánh giá</button></div>":"<div class=\"actions\"><button class=\"btn danger\" id=\"rDel\">Delete review</button></div>","<div class=\"actions\"><button class=\"btn\" id=\"tClose\">Đóng</button></div>":"<div class=\"actions\"><button class=\"btn\" id=\"tClose\">Close</button></div>","<div class=\"empty\">Chưa có bản sao lưu nào — bấm \"Chụp bản sao lưu ngay\".</div>":"<div class=\"empty\">No backups yet — click \"Take backup now\".</div>","<div class=\"empty\">Chưa có dữ liệu</div>":"<div class=\"empty\">No data yet</div>","<div class=\"empty\">Chưa có giấy tờ nào</div>":"<div class=\"empty\">No documents yet</div>","<div class=\"empty\">Chưa có hoạt động</div>":"<div class=\"empty\">No activity yet</div>","<div class=\"empty\">Chưa có hợp đồng nào.</div>":"<div class=\"empty\">No contracts yet.</div>","<div class=\"empty\">Chưa có hợp đồng</div>":"<div class=\"empty\">No contracts yet</div>","<div class=\"empty\">Chưa có nhân sự nào.</div>":"<div class=\"empty\">No employees yet.</div>","<div class=\"empty\">Chưa có nhân sự, hoặc mọi người đều có quản lý (vòng lặp). Thêm nhân sự ở tab Danh bạ.</div>":"<div class=\"empty\">No employees yet, or everyone has a manager (loop). Add employees in the Directory tab.</div>","<div class=\"empty\">Chưa có nhân sự.</div>":"<div class=\"empty\">No employees yet.</div>","<div class=\"empty\">Chưa có offer nào. Mở hồ sơ ứng viên → \"Tạo offer\", hoặc bấm \"+ Offer\".</div>":"<div class=\"empty\">No offers yet. Open a candidate profile → \"Create offer\", or click \"+ Offer\".</div>","<div class=\"empty\">Chưa có vị trí nào. Bấm \"+ Vị trí\" để thêm.</div>":"<div class=\"empty\">No jobs yet. Click \"+ Job\" to add one.</div>","<div class=\"empty\">Chưa có đánh giá nào.</div>":"<div class=\"empty\">No reviews yet.</div>","<div class=\"empty\">Chưa có đánh giá</div>":"<div class=\"empty\">No reviews yet</div>","<div class=\"empty\">Chưa có đơn nghỉ nào.</div>":"<div class=\"empty\">No leave requests yet.</div>","<div class=\"empty\">Chưa có ứng viên</div>":"<div class=\"empty\">No candidates yet</div>","<div class=\"empty\">Chưa gửi email nào từ app.</div>":"<div class=\"empty\">No emails sent from the app yet.</div>","<div class=\"empty\">Chưa gửi lần nào</div>":"<div class=\"empty\">Never sent</div>","<div class=\"empty\">Chưa áp dụng mẫu onboarding</div>":"<div class=\"empty\">No onboarding template applied</div>","<div class=\"empty\">Không có ai đang thử việc.</div>":"<div class=\"empty\">No one is on probation.</div>","<div class=\"panel\" style=\"margin-bottom:14px\"><b>Không có việc nào quá hạn.</b> <span class=\"meta\">Hệ thống tự quét mỗi sáng 8h.</span></div>":"<div class=\"panel\" style=\"margin-bottom:14px\"><b>No overdue tasks.</b> <span class=\"meta\">The system scans every morning at 8:00.</span></div>","<div class=\"tags\" style=\"margin-top:10px\"><span class=\"tag soon\">chưa có checklist</span></div>":"<div class=\"tags\" style=\"margin-top:10px\"><span class=\"tag soon\">no checklist yet</span></div>","<p class=\"empty\">Đang tải...</p>":"<p class=\"empty\">Loading...</p>","<span class=\"meta\">không xác định</span>":"<span class=\"meta\">unknown</span>","<span class=\"tag ok\">có JD</span>":"<span class=\"tag ok\">has JD</span>","<span class=\"tag warn\">thiếu JD</span>":"<span class=\"tag warn\">missing JD</span>","<span class=\"tag\">bạn</span>":"<span class=\"tag\">you</span>","<span class=\"tag\">chưa đánh giá</span>":"<span class=\"tag\">not reviewed</span>","? Không khôi phục được.":"? Unable to restore.","Bảng điều hành":"Dashboard","Bắt đầu":"Start","Bằng cấp / chứng chỉ":"Degrees / certificates","Chuyên môn / chất lượng công việc":"Expertise / work quality","Chuyển vòng:":"Move stage:","Chính thức":"Active","Chưa có bản sao lưu nào — bấm \"Chụp bản sao lưu ngay\".":"No backups yet — click \"Take backup now\".","Chưa có checklist. Chọn mẫu để tạo:":"No checklist yet. Choose a template to create one:","Chưa có dữ liệu":"No data yet","Chưa có dữ liệu để xuất":"No data to export","Chưa có giấy tờ nào":"No documents yet","Chưa có hoạt động":"No activity yet","Chưa có hợp đồng":"No contracts yet","Chưa có hợp đồng nào.":"No contracts yet.","Chưa có nhân sự nào.":"No employees yet.","Chưa có nhân sự.":"No employees yet.","Chưa có offer nào. Mở hồ sơ ứng viên → \"Tạo offer\", hoặc bấm \"+ Offer\".":"No offers yet. Open a candidate profile → \"Create offer\", or click \"+ Offer\".","Chưa có thông tin":"No information yet","Chưa có tiêu đề":"No title yet","Chưa có vị trí nào. Bấm \"+ Vị trí\" để thêm.":"No jobs yet. Click \"+ Job\" to add one.","Chưa có đánh giá":"No reviews yet","Chưa có đánh giá nào.":"No reviews yet.","Chưa có đơn nghỉ nào.":"No leave requests yet.","Chưa có ứng viên":"No candidates yet","Chưa gán":"Unassigned","Chưa gắn hồ sơ nhân sự cho tài khoản này":"No employee profile linked to this account","Chưa gửi email nào từ app.":"No emails sent from the app yet.","Chưa gửi lần nào":"Never sent","Chưa rõ":"Unknown","Chưa rõ vị trí hiện tại":"Current job unknown","Chưa áp dụng mẫu onboarding":"No onboarding template applied","Chạy kiểm tra toàn bộ chức năng":"Run full system test","Chọn file & tải lên":"Choose file & upload","Chọn ngày bắt đầu và kết thúc":"Select start and end dates","Chọn nhân sự":"Select employee","Chỗ ở hiện tại":"Current residence","Chờ duyệt":"Pending approval","Chờ phản hồi":"Awaiting response","Chụp bản sao lưu ngay":"Take backup now","Chức danh":"Job title","Chức danh hiện tại":"Current job title","Chức vụ người ký":"Signatory's title","Còn thiếu thông tin:":"Missing information:","Có":"Yes","Có / Không":"Yes / No","Công ty hiện tại":"Current company","Cấp bậc":"Level","Cần cải thiện":"Needs improvement","Cần nhập họ tên":"Full name required","Cần nhập tên vị trí":"Job name required","Cần tên ứng viên và vị trí":"Candidate name and job required","Cột có dấu * là bắt buộc.":"Columns marked * are required.","Danh bạ nhân sự":"People directory","Duyệt":"Approve","Dòng mẫu ở sheet đầu chỉ để tham khảo — xoá đi trước khi nhập.":"The sample row in the first sheet is for reference only — delete it before importing.","Dải lương":"Salary range","Email công ty":"Company email","Email người nhận chưa hợp lệ":"Recipient email is invalid","Email này chưa được phép dùng hệ thống. Chỉ email công ty (@helidirect.com) đăng nhập được — liên hệ phòng Nhân sự nếu cần mở thêm.":"This email is not yet authorized to use the system. Only company emails (@helidirect.com) can sign in — contact HR if more access is needed.","Email đã soạn":"Drafted email","Email ứng viên":"Candidate email","File này giống mô tả công việc hơn là CV — kiểm tra lại giúp bạn nhé":"This file looks more like a job description than a CV — please double-check","File quá 15MB":"File exceeds 15MB","Ghi chú":"Notes","Ghi chú khác":"Other notes","Ghi chú nội bộ":"Internal notes","Gia hạn thử việc":"Extend probation","Giá trị cho phép:":"Allowed values:","Giám đốc":"Director","Giấy khám sức khoẻ":"Health certificate","Giấy tờ BHXH":"Social insurance documents","Giới tính":"Gender","Gắn với hồ sơ nhân sự":"Link to employee profile","Gửi email":"Send email","Gửi link đăng nhập":"Send login link","Gửi lỗi:":"Send error:","Gửi ngay":"Send now","Gửi ngay (":"Send now (","Gửi tới *":"Send to *","Hiện ứng viên đã loại / rút":"Show rejected / withdrawn candidates","Hiệu lực":"Effective","Hiệu lực từ":"Effective from","Hiệu lực từ (yyyy-mm-dd)":"Effective from (yyyy-mm-dd)","Huỷ":"Cancel","HĐ hết hạn ≤30 ngày":"Contracts expiring ≤30 days","Hướng dẫn nhập liệu":"Data entry guide","Hạn":"Due","Hạn hiệu lực (nếu có)":"Expiry date (if any)","Hạn mức phép":"Leave balance","Hạn mức phép năm":"Annual leave balance","Hạn phản hồi":"Response deadline","Hạn tuyển xong":"Hiring deadline","Hạn tuyển xong (yyyy-mm-dd)":"Hiring deadline (yyyy-mm-dd)","Hết hạn":"Expired","Hết hạn (trống = không xác định)":"Expiry (blank = unspecified)","Hết hạn (yyyy-mm-dd)":"Expiry (yyyy-mm-dd)","Hệ thống chỉ gửi được vài email đăng nhập mỗi giờ. Đợi ít phút rồi thử lại, hoặc nhờ HR gửi lại sau.":"The system can only send a few login emails per hour. Wait a few minutes and retry, or ask HR to resend later.","Hệ thống tự quét mỗi sáng 8h.":"The system scans every morning at 8:00.","Họ tên":"Full name","Họ tên *":"Full name *","Hồ sơ & giấy tờ":"Records & documents","Hồ sơ & giấy tờ —":"Records & documents —","Hộ khẩu thường trú":"Permanent residence registration","Hợp đồng":"Contract","Hợp đồng đã ký":"Signed contract","Hợp đồng —":"Contract —","In / Lưu PDF":"Print / Save PDF","In / Lưu thành PDF":"Print / Save as PDF","Khác":"Other","Không":"No","Không có ai đang thử việc.":"No one is on probation.","Không có việc nào quá hạn.":"No overdue tasks.","Không tải được thư viện Excel (kiểm tra mạng)":"Could not load the Excel library (check your network)","Không xác định thời hạn":"Indefinite term","Không đạt":"Failed","Không đọc được file:":"Cannot read file:","Không đọc được nội dung CV, nhập tay giúp bạn nhé":"Cannot read CV content, please enter manually","Không đổi được vòng:":"Cannot change stage:","Kiểm tra hệ thống":"System check","Kênh":"Channel","Kết luận":"Conclusion","Kỹ năng (cách nhau bằng dấu phẩy)":"Skills (comma-separated)","Kỹ năng (phẩy)":"Skills (comma)","Liên hệ khẩn cấp":"Emergency contact","Loại":"Type","Loại giấy tờ":"Document type","Loại hình":"Employment type","Loại hình:":"Employment type:","Loại hợp đồng":"Contract type","Loại nghỉ":"Leave type","Loại ứng viên":"Candidate type","Làm mới":"Refresh","Lý do":"Reason","Lý do từ chối (không bắt buộc):":"Rejection reason (optional):","Lưu":"Save","Lưu ghi chú":"Save note","Lưu hồ sơ":"Save profile","Lưu hồ sơ OK nhưng upload CV lỗi:":"Profile saved, but CV upload failed:","Lưu ý":"Note","Lương":"Salary","Lương CB":"Base pay","Lương chính thức (gross, VNĐ)":"Official salary (gross, VND)","Lương cơ bản":"Base salary","Lương cơ bản (VND)":"Base salary (VND)","Lương thử việc (%)":"Probation salary (%)","Lịch sử":"History","Lỗi":"Error","Lỗi lưu offer:":"Error saving offer:","Lỗi lưu:":"Save error:","Lỗi sao lưu:":"Backup error:","Lỗi tải dữ liệu:":"Data load error:","Lỗi xoá:":"Delete error:","Lỗi:":"Error:","Mã nhân viên":"Employee ID","Mã số thuế cá nhân":"Personal tax code","Mô tả chung":"General description","Mẫu":"Template","Mẫu checklist":"Checklist template","Mẫu này chưa có việc nào":"This template has no tasks yet","Mẫu onboarding":"Onboarding template","Mẫu thư":"Email template","Mốc ngày bắt đầu":"Start date anchor","Mở":"Open","Mở Gmail OK nhưng ghi log lỗi:":"Gmail opened, but logging failed:","Mở lại":"Reopen","Mở trong Gmail":"Open in Gmail","Mức lương:":"Salary:","Nghỉ phép":"Leave","Nguồn":"Source","Nguồn ứng viên":"Candidate source","Ngành hàng / BU":"Business unit","Ngày":"Date","Ngày bắt đầu":"Start date","Ngày cấp":"Issue date","Ngày ghi dạng yyyy-mm-dd hoặc dd/mm/yyyy.":"Dates in yyyy-mm-dd or dd/mm/yyyy format.","Ngày ký":"Signing date","Ngày ký (yyyy-mm-dd)":"Signing date (yyyy-mm-dd)","Ngày kết thúc phải sau ngày bắt đầu":"End date must be after start date","Ngày sinh":"Date of birth","Ngày vào làm":"Join date","Ngày vào làm (yyyy-mm-dd)":"Join date (yyyy-mm-dd)","Ngày đánh giá":"Review date","Ngân hàng":"Bank","Người duyệt":"Approver","Người ký":"Signatory","Người nhận":"Recipient","Người đánh giá":"Reviewer","Nháp":"Draft","Nhân sự":"Employees","Nhân sự (HR)":"Employees (HR)","Nhân sự (họ tên) *":"Employee (full name) *","Nhân sự *":"Employee *","Nhân sự theo phòng ban":"Employees by department","Nhân sự đang làm":"Active employees","Nhân viên":"Employee","Nhận xét phỏng vấn, mức lương mong muốn...":"Interview notes, desired salary...","Nhập Excel":"Import Excel","Nơi cấp":"Place of issue","Nơi làm việc":"Workplace","Nơi làm việc:":"Workplace:","Nội dung":"Content","Nữ":"Female","Offer chờ phản hồi":"Offers awaiting response","Parse lỗi (":"Parse error (","Phân quyền":"Roles & permissions","Phép năm (ngày)":"Annual leave (days)","Phòng ban":"Department","Phối hợp & giao tiếp":"Collaboration & communication","Phụ cấp":"Allowance","Phụ trách":"In charge","QUYỀN LỢI":"BENEFITS","Quyền lợi":"Benefits","Quyền lợi (mỗi dòng 1 ý)":"Benefits (one per line)","Quét nhắc việc ngay":"Scan reminders now","Quản lý":"Manager","Quản lý trực tiếp":"Direct manager","Quản lý trực tiếp (họ tên)":"Direct manager (full name)","Quản lý tuyển dụng":"Hiring manager","Quản trị (toàn quyền)":"Admin (full access)","Sao chép JD":"Copy JD","Sao lưu dữ liệu":"Data backup","Soạn email":"Compose email","Sơ yếu lý lịch":"Resume","Sơ đồ dựng tự động từ cột \"Quản lý trực tiếp\" trong Danh bạ nhân sự.":"Chart auto-built from the \"Direct manager\" column in the People directory.","Sơ đồ tổ chức":"Org chart","Số CCCD/CMND":"ID number (CCCD/CMND)","Số HĐ":"Contract no.","Số hợp đồng":"Contract number","Số liệu cập nhật theo thời gian thực từ dữ liệu đang dùng.":"Figures update in real time from live data.","Số lượng":"Quantity","Số lượng cần tuyển":"Headcount","Số lượng:":"Quantity:","Số ngày":"Days","Số ngày (tự tính, sửa được)":"Days (auto-calculated, editable)","Số người phụ thuộc":"Number of dependents","Số năm kinh nghiệm":"Years of experience","Số sổ BHXH":"Social insurance book no.","Số tài khoản":"Account number","Sửa":"Edit","Sửa mẫu —":"Edit template —","Sửa offer":"Edit offer","Sửa đánh giá thử việc":"Edit probation review","Sửa đơn nghỉ":"Edit leave request","TP. Hồ Chí Minh":"Ho Chi Minh City","TRÁCH NHIỆM CHÍNH":"KEY RESPONSIBILITIES","Thiếu dữ liệu:":"Missing data:","Thoát":"Sign out","Thành thạo tiếng Việt":"Fluent in Vietnamese","Thái độ, tinh thần trách nhiệm":"Attitude and sense of responsibility","Thêm ghi chú":"Add note","Thêm hợp đồng":"Add contract","Thêm nhân sự":"Add employee","Thêm vị trí":"Add job","Thêm ứng viên":"Add candidate","Thư & Email":"Mail & Email","Thời gian":"Time","Thời gian làm việc":"Working hours","Thời gian tuyển TB":"Avg. time to hire","Thời vụ":"Seasonal","Thời vụ / dịch vụ":"Seasonal / service","Thời điểm":"Timing","Thứ 2 - Thứ 6, 8h30 - 17h30":"Mon - Fri, 8:30 - 17:30","Thử việc":"Probation","Thử việc (tháng)":"Probation (months)","Thực tập":"Internship","Tiêu đề":"Title","Tiến độ & khối lượng hoàn thành":"Progress & workload completed","Trách nhiệm chính":"Key responsibilities","Trách nhiệm chính (mỗi dòng 1 ý)":"Key responsibilities (one per line)","Trình duyệt chặn cửa sổ in — cho phép popup rồi thử lại":"Browser blocked the print window — allow popups and retry","Trạng thái":"Status","Tuyển dụng":"Recruiting","Tuân thủ nội quy, giờ giấc":"Compliance with rules and punctuality","Tài khoản":"Account","Tài khoản của bạn chưa gắn với hồ sơ nhân sự nào — HR vào tab":"Your account is not linked to any employee profile — HR go to the tab","Tên mẫu":"Template name","Tên vị trí *":"Job name *","Tên ứng viên *":"Candidate name *","Tìm nhân sự...":"Search employees...","Tìm theo nhân sự, số HĐ...":"Search by employee, contract no....","Tìm theo tên ứng viên, email...":"Search by candidate name, email...","Tìm theo tên, lý do...":"Search by name, reason...","Tìm tên, chức danh, phòng ban, email...":"Search name, job title, department, email...","Tìm tên, email, skill, công ty...":"Search name, email, skill, company...","Tìm vị trí, phòng ban...":"Search job, department...","Tạo hồ sơ":"Create profile","Tạo offer":"Create offer","Tạo offer letter":"Create offer letter","Tạo đơn nghỉ":"Create leave request","Tải CV lên":"Upload CV","Tải bản mới nhất (.json)":"Download latest (.json)","Tải mẫu Excel":"Download Excel template","Tải về":"Download","Tất cả vị trí":"All jobs","Tỉ lệ nhận offer":"Offer acceptance rate","Tổng số dòng":"Total rows","Từ":"From","Từ chối":"Reject","Từ ngày":"From date","Từ ngày *":"From date *","Upload lỗi:":"Upload error:","Vai trò":"Role","Viết nội dung social":"Write social content","Việc cần làm":"To-dos","Vòng":"Stage","Vị trí":"Job","Vị trí & JD":"Jobs & JD","Vị trí *":"Job *","Vị trí tuyển dụng":"Job opening","Vị trí đang tuyển":"Open jobs","Vị trí ứng tuyển":"Applied job","Vị trí ứng tuyển (tên)":"Applied job (name)","Xem trước 5 dòng đầu.":"Preview of first 5 rows.","Xoá":"Delete","Xoá checklist":"Delete checklist","Xoá giấy tờ này?":"Delete this document?","Xoá toàn bộ checklist của":"Delete the entire checklist of","Xoá đánh giá":"Delete review","Xuất Excel":"Export Excel","Xác định 12 tháng":"Fixed-term 12 months","Xác định 24 tháng":"Fixed-term 24 months","YÊU CẦU":"REQUIREMENTS","Yêu cầu":"Requirements","Yêu cầu (mỗi dòng 1 ý)":"Requirements (one per line)","\nMÔ TẢ":"\nDESCRIPTION","bạn":"you","chưa có checklist":"no checklist yet","chưa kết luận":"no conclusion yet","chưa đánh giá":"not reviewed","có JD":"has JD","dòng hợp lệ ·":"valid rows ·","hôm nay":"today","hợp đồng này":"this contract","không bắt buộc":"optional","không thời hạn":"indefinite","không xác định":"unknown","lỗi không rõ":"unknown error","ngày":"days","nhân sự":"employees","offer của":"offer for","phải trùng tên đã có trong app":"must match an existing name in the app","quy tắc":"rules","theo chính sách công ty":"per company policy","thiếu JD":"missing JD","thiếu cột bắt buộc:":"missing required columns:","việc":"tasks","vòng lặp quản lý — kiểm tra lại":"management loop — please check","vị trí":"jobs","· hạn":"· due","· quá hạn":"· overdue","· vào":"· joined","Áp dụng mẫu":"Apply template","Đang chuẩn bị file...":"Preparing file...","Đang thử việc":"On probation","Đang tuyển":"Hiring","Đang tuyển (Có/Không)":"Hiring (Yes/No)","Đang tải...":"Loading...","Đang đọc":"Reading","Điểm":"Score","Điểm mạnh":"Strengths","Điểm trung bình":"Average score","Điện thoại":"Phone","Đánh giá thử việc":"Probation review","Đã chấm dứt":"Terminated","Đã copy JD vào clipboard":"JD copied to clipboard","Đã cập nhật đơn":"Request updated","Đã duyệt":"Approved","Đã duyệt đơn":"Request approved","Đã dùng":"Used","Đã gắn hồ sơ nhân sự":"Employee profile linked","Đã gửi":"Sent","Đã gửi email tới":"Email sent to","Đã gửi link tới":"Link sent to","Đã gửi đơn nghỉ, chờ duyệt":"Leave request submitted, awaiting approval","Đã huỷ":"Cancelled","Đã làm mới":"Refreshed","Đã lưu":"Saved","Đã lưu hạn mức phép":"Leave balance saved","Đã lưu hồ sơ cá nhân":"Personal profile saved","Đã lưu mẫu":"Template saved","Đã lưu đánh giá":"Review saved","Đã mở Gmail":"Gmail opened","Đã mở Gmail và ghi vào lịch sử":"Gmail opened and logged to history","Đã nghỉ":"Resigned","Đã quét lại việc cần nhắc":"Reminders rescanned","Đã rút thông tin bằng":"Extracted info using","Đã thêm":"Added","Đã thêm ghi chú":"Note added","Đã thêm hợp đồng":"Contract added","Đã thêm nhân sự":"Employee added","Đã thêm vị trí":"Job added","Đã tạo":"Created","Đã tải file mẫu":"Template file downloaded","Đã tải file sao lưu — cất vào Drive giúp bạn nhé":"Backup file downloaded — please store it in Drive","Đã tải lên":"Uploaded","Đã từ chối đơn":"Request rejected","Đã xong (Có/Không)":"Done (Yes/No)","Đã xoá":"Deleted","Đã xoá checklist":"Checklist deleted","Đã xử lý":"Processed","Đã đóng":"Closed","Đã đổi vai trò":"Role changed","Đóng":"Close","Đơn của tôi chờ duyệt":"My requests pending approval","Đơn nghỉ chờ duyệt":"Leave requests pending approval","Đơn nghỉ phép":"Leave request","Đạt — ký chính thức":"Passed — sign as official","Đến":"To","Đến ngày":"To date","Đến ngày *":"To date *","Đồng ý":"Agree","Đổi trạng thái:":"Change status:","đánh giá này":"this review","đã loại":"rejected","đã rút":"withdrawn","để gắn, khi đó mới tạo được đơn nghỉ cho chính mình.":"to link, then you can create leave requests for yourself.","Ứng viên":"Candidate","Ứng viên theo vòng":"Candidates by stage","Ứng viên từ chối":"Candidates who declined","Ứng viên đang xử lý":"Candidates in process","Ứng viên đồng ý":"Candidates who accepted","— chưa gán —":"— unassigned —","— chưa gắn —":"— not linked —","— chưa kết luận —":"— no conclusion —","— chọn —":"— select —","— các chỗ này hiện dấu \"…\" trong thư.":"— these spots show \"…\" in the email.","— không có —":"— none —","• Người mới đăng nhập lần đầu mặc định là":"• New users signing in for the first time default to","Ai được xem gì: HR/Quản trị thấy toàn bộ · Quản lý thấy tuyển dụng, đội của mình · Nhân viên chỉ thấy danh bạ, onboarding và nghỉ phép của mình.":"Who sees what: HR/Admin see everything · Managers see recruiting and their own team · Staff see only the directory, onboarding and their own leave.","Chưa có nhân sự, hoặc mọi người đều có quản lý (vòng lặp). Thêm nhân sự ở tab Danh bạ.":"No employees yet, or everyone has a manager (a loop). Add employees in the People directory tab.","Gmail mở sẵn thư đã điền; bấm Gửi trong Gmail là xong. Thư sẽ nằm trong hộp Sent của bạn.":"Gmail opens with the message pre-filled; just click Send in Gmail. A copy stays in your Sent folder.","Hệ thống tự chụp toàn bộ dữ liệu mỗi ngày lúc 2h10 sáng và giữ 31 bản gần nhất (mỗi ngày trong tháng một bản). Bấm \"Tải về\" để giữ thêm một bản ngoài hệ thống — nên làm mỗi tháng một lần.":"The system snapshots all data every day at 2:10 AM and keeps the 31 most recent copies (one per day of the month). Click \"Download\" to keep an extra copy outside the system — once a month is enough.","Đăng nhập bằng email công ty (@helidirect.com). Hệ thống gửi link đăng nhập dùng 1 lần.":"Sign in with your company email (@helidirect.com). We send a one-time sign-in link.","• Lương và hợp đồng chỉ HR/Quản trị xem được; file hồ sơ (CCCD, HĐ scan) cũng vậy.":"• Salary and contracts are visible to HR/Admin only; so are personal files (ID card, scanned contracts).","• Phải gắn tài khoản với hồ sơ nhân sự thì người đó mới tạo được đơn nghỉ và thấy hợp đồng của chính mình.":"• An account must be linked to an employee record before that person can file leave or see their own contract.","\" chỉ nhận:":"\" only accepts:","\" không hợp lệ":"\" is invalid","\" phải là số, đang là \"":"\" must be a number, currently \"","\" sai định dạng, cần yyyy-mm-dd":"\" has wrong format, expected yyyy-mm-dd","(còn":"(remaining","(ngày":"(days",") sẽ được cập nhật thay vì tạo mới":") will be updated instead of created",", cập nhật":", updated",", phòng":", departments","... và":"... and","Biến dùng được:":"Available variables:","Chờ bạn duyệt (":"Awaiting your approval (","Dòng":"Row","Email đã soạn (":"Drafted emails (","Giấy tờ đính kèm (":"Attached documents (","Hợp đồng (":"Contracts (","Lịch sử email (":"Email history (","Lịch sử đánh giá (":"Review history (","Lỗi ở dòng \"":"Error on row \"","Mở CV (":"Open CV (","Nhập":"Import","Nhập Excel —":"Import Excel —","Phép năm còn lại (":"Annual leave remaining (","Sắp hết hạn trong 30 ngày (":"Expiring within 30 days (","Tiêu đề:":"Subject:","Việc cần xử lý (":"Tasks to handle (","bắt đầu":"start","dòng":"rows","dòng (":"rows (","dòng lỗi":"error rows","dòng mới":"new rows","dòng nữa":"more rows","dòng trùng (":"duplicate rows (","hạn đánh giá":"review due","hết hạn":"expired","không tìm thấy nhân sự \"":"employee not found \"","không tìm thấy vị trí \"":"job not found \"","ngày \"":"date \"","ngày)":"days)","quá hạn":"overdue","thiếu \"":"missing \"","việc xong":"tasks done","vòng \"":"stage \"","Đang thử việc (":"On probation (","Đánh giá thử việc (":"Probation reviews (","Đã nhập:":"Imported:","Đã sao lưu":"Backed up","Đã xuất":"Exported","Đơn nghỉ (":"Leave requests (","đã tuyển":"hired","Ứng viên (":"Candidates (","ứng viên":"candidates","Tổng quan":"Overview","Nhân sự mới":"New hires","Hồ sơ nhân sự":"Employee records","Tải mẫu":"Download template","Xuất":"Export","Nhập dữ liệu —":"Import data —","Tìm nhân sự mới...":"Search new hires...","Hợp đồng lao động (":"Employment contracts (","✓ Onboarding xong":"✓ Onboarding complete","☐ Chưa có checklist":"☐ No checklist yet","⏱ Thử việc · hạn":"⏱ Probation · due","Xác nhận hoàn tất":"Confirm completion","Xác nhận":"Confirmed","Hồ sơ":"Profile","Đánh giá":"Review","chưa":"not yet","Không có nhân sự mới nào đang thử việc.":"No new hires on probation.","Nhân sự đã nhận offer và vào làm, còn trong thời gian thử việc. Hồ sơ ở lại nhóm này cho tới khi checklist onboarding xong và quản lý xác nhận đạt — sau đó tự chuyển sang Hồ sơ nhân sự.":"People who accepted an offer and joined, still within probation. A record stays in this group until the onboarding checklist is complete and the manager confirms a pass — then it moves to Employee records automatically.","Checklist onboarding chưa xong":"Onboarding checklist is not complete","Chưa có đánh giá thử việc":"No probation review yet","Đánh giá chưa đạt — chưa chuyển nhóm được":"Review not passed — cannot move the record yet","Đã chuyển sang Hồ sơ nhân sự":"Moved to Employee records","Vai trò & quyền hạn":"Roles & permissions","+ Vai trò mới":"+ New role","Vai trò mới":"New role","Nhóm quyền gốc":"Base permission group","Nhóm quyền gốc *":"Base permission group *","Đang dùng":"In use","Quyền bật":"Enabled","Sửa quyền":"Edit permissions","Tên vai trò *":"Role name *","Mã (không dấu, không khoảng trắng) *":"Code (no accents or spaces) *","Thứ tự hiển thị":"Display order","Cần tên và mã vai trò":"Role name and code are required","Mã vai trò đã tồn tại":"Role code already exists","Đã tạo vai trò":"Role created","Còn tài khoản đang dùng vai trò này":"Accounts are still using this role","Đã xoá vai trò":"Role deleted","Quyền của vai trò —":"Role permissions —","Nhóm chức năng":"Module","Bỏ chọn hết":"Clear all","Chọn hết":"Select all","Lưu quyền":"Save permissions","Đã lưu quyền vai trò":"Role permissions saved","Lỗi lưu quyền:":"Error saving permissions:","hệ thống":"system","tài khoản":"accounts","Quản trị luôn có toàn quyền, không chỉnh được.":"Admin always has full access and cannot be edited.","Mỗi vai trò dựa trên một nhóm quyền gốc (quyết định dữ liệu người đó đọc/ghi được ở tầng cơ sở dữ liệu), cộng với ma trận quyền thao tác bên dưới. Vai trò hệ thống không xoá được.":"Each role is based on a base permission group (which decides what data the person can read and write at the database level), plus the action matrix below. System roles cannot be deleted.","Nhóm quyền gốc: ":"Base permission group: ","— quyết định phạm vi dữ liệu ở tầng cơ sở dữ liệu. Ma trận dưới đây quyết định thao tác trong app.":"— decides the data scope at the database level. The matrix below decides actions inside the app.","Báo cáo":"Reports","Sao lưu":"Backup","Xem":"View","Tạo mới":"Create","Duyệt / xác nhận":"Approve / confirm","Ghi chú / bình luận":"Note / comment","Quản trị":"Admin","In JD / PDF":"Print JD / PDF","Xoá vai trò \"":"Delete role \""};
 const I18N_NORM = {};
 for (const k in I18N_EN) I18N_NORM[k.replace(/\s+/g, ' ').trim()] = I18N_EN[k];
 const I18N_KEYS = Object.keys(I18N_EN).filter(k => k.length >= 5).sort((a, b) => b.length - a.length);
