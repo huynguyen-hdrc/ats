@@ -270,7 +270,11 @@ function formModal(title, spec, values, onSave) {
   openModal(title, `<div class="row2">${fieldsHTML(spec, values, 'm')}</div>
     <div class="actions"><button class="btn" id="fCancel">Huỷ</button><button class="btn primary" id="fSave">Lưu</button></div>`);
   $('fCancel').onclick = closeAll;
-  $('fSave').onclick = async () => { await onSave(readFields(spec, 'm')); };
+  $('fSave').onclick = async () => {
+    const b = $('fSave'); if (b.disabled) return;
+    b.disabled = true;
+    try { await onSave(readFields(spec, 'm')); } finally { const n = $('fSave'); if (n) n.disabled = false; }
+  };
 }
 async function upsert(table, payload, id) {
   const r = id ? await sb.from(table).update(payload).eq('id', id) : await sb.from(table).insert(payload);
@@ -1162,7 +1166,7 @@ function cellIn(col, raw, rowErrors) {
   const empty = v == null || v === '';
   if (empty) {
     if (col.req) { rowErrors.push(`thiếu "${col.h}"`); return undefined; }
-    return col.def !== undefined ? col.def : null;
+    return undefined; // ô trống: không ghi đè dữ liệu đang có, để DB tự áp mặc định khi thêm mới
   }
   if (col.lookup === 'employee') {
     const e = state.employees.find(x => x.full_name.toLowerCase() === String(v).toLowerCase());
@@ -1209,7 +1213,7 @@ function parseAoa(entity, aoa) {
     if (!r || r.every(c => c == null || String(c).trim() === '')) return;
     const msgs = [], out = {};
     cfg.cols.forEach(c => {
-      if (idx[c.k] === undefined) { if (c.def !== undefined) out[c.k] = c.def; return; }
+      if (idx[c.k] === undefined) return; // cột không có trong file: giữ nguyên giá trị cũ
       const v = cellIn(c, r[idx[c.k]], msgs);
       if (v !== undefined) out[c.k] = v;
     });
@@ -1283,12 +1287,20 @@ async function previewImport(entity, file) {
   $('imCancel').onclick = closeAll;
   $('imGo').onclick = async () => {
     $('imGo').disabled = true;
+    const defaults = Object.fromEntries(cfg.cols.filter(c => c.def !== undefined).map(c => [c.k, c.def]));
+    const seen = new Map(existing.map(e => [String(e[key] || '').toLowerCase(), e.id]));
     let ins = 0, upd = 0;
     for (const r of rows) {
-      const match = key && r[key] ? existing.find(e => String(e[key] || '').toLowerCase() === String(r[key]).toLowerCase()) : null;
-      const res = match ? await sb.from(cfg.table).update(r).eq('id', match.id) : await sb.from(cfg.table).insert(r);
-      if (res.error) { toast(`Lỗi ở dòng "${r.full_name || r.title || ''}": ${res.error.message}`, 8000); $('imGo').disabled = false; return; }
-      match ? upd++ : ins++;
+      const k = key && r[key] ? String(r[key]).toLowerCase() : null;
+      const matchId = k ? seen.get(k) : null;
+      const res = matchId
+        ? await sb.from(cfg.table).update(r).eq('id', matchId)               // chỉ ghi cột có trong file
+        : await sb.from(cfg.table).insert({ ...defaults, ...r }).select('id').single();
+      if (res.error) {
+        toast(`Dừng ở dòng "${r.full_name || r.title || ''}": ${res.error.message} — ${ins} dòng đã thêm, ${upd} đã cập nhật. Xoá các dòng này khỏi file trước khi nhập lại.`, 12000);
+        $('imGo').disabled = false; await loadAll(); render(); return;
+      }
+      if (matchId) upd++; else { ins++; if (k && res.data?.id) seen.set(k, res.data.id); } // chặn trùng trong cùng file
     }
     closeAll(); await loadAll(); render();
     toast(`Đã nhập: ${ins} dòng mới${upd ? `, cập nhật ${upd} dòng` : ''}`);
@@ -1738,11 +1750,12 @@ function workDays(a, b) {
 }
 const leaveName = (l) => empName(l.employee_id) || '(chưa gán nhân sự)';
 function myTeamIds() {
-  return state.employees.filter(e => e.manager_id === state.myEmp).map(e => e.id);
+  if (!state.myEmp) return [];
+  return state.employees.filter(e => e.manager_id && e.manager_id === state.myEmp).map(e => e.id);
 }
 function viewLeave() {
   const team = myTeamIds();
-  const mine = state.leaves.filter(l => l.employee_id === state.myEmp);
+  const mine = state.myEmp ? state.leaves.filter(l => l.employee_id === state.myEmp) : [];
   const toApprove = state.leaves.filter(l => l.status === 'pending' && (isHR() || team.includes(l.employee_id)));
   const all = isHR() ? state.leaves : state.leaves.filter(l => l.employee_id === state.myEmp || team.includes(l.employee_id));
   const rows = all.filter(l => hit({ ...l, nm: leaveName(l) }, ['nm', 'reason']));
@@ -1793,15 +1806,24 @@ function viewLeave() {
   document.querySelectorAll('[data-no]').forEach(b => b.onclick = (e) => { e.stopPropagation(); decideLeave(b.dataset.no, 'rejected'); });
   document.querySelectorAll('[data-leave]').forEach(tr => tr.onclick = () => {
     const l = state.leaves.find(x => x.id === tr.dataset.leave);
-    if (isHR() || l.employee_id === state.myEmp) leaveForm(l.id);
+    if (!l) return;
+    if (isHR()) return leaveForm(l.id);
+    if (!state.myEmp || l.employee_id !== state.myEmp) return;
+    if (l.status !== 'pending') return toast('Đơn đã được xử lý — liên hệ HR nếu cần sửa', 5000);
+    leaveForm(l.id);
   });
 }
 async function decideLeave(id, status) {
-  const note = status === 'rejected' ? prompt('Lý do từ chối (không bắt buộc):') : null;
-  const { error } = await sb.from('leave_requests').update({
+  let note = null;
+  if (status === 'rejected') {
+    note = prompt('Lý do từ chối (không bắt buộc):');
+    if (note === null) return; // người dùng bấm Huỷ
+  }
+  const { data, error } = await sb.from('leave_requests').update({
     status, decided_at: new Date().toISOString(), approver_name: state.me, decision_note: note
-  }).eq('id', id);
+  }).eq('id', id).eq('status', 'pending').select('id');
   if (error) return toast('Lỗi: ' + error.message, 6000);
+  if (!data || !data.length) { await loadAll(); render(); return toast('Đơn này đã được người khác xử lý', 5000); }
   await loadAll(); render(); toast(status === 'approved' ? 'Đã duyệt đơn' : 'Đã từ chối đơn');
 }
 function leaveForm(id) {
@@ -1819,15 +1841,18 @@ function leaveForm(id) {
   const values = l || { employee_id: state.myEmp || '', type_key: 'annual', start_date: today(), end_date: today(), days: 1, status: 'pending' };
   formModal(id ? 'Sửa đơn nghỉ' : 'Tạo đơn nghỉ', spec, values, async (o) => {
     const payload = { ...o, employee_id: canPickEmp ? o.employee_id : state.myEmp };
+    if (!canPickEmp) payload.status = 'pending'; // sửa đơn là phải duyệt lại
     if (!payload.employee_id) return toast('Chưa gắn hồ sơ nhân sự cho tài khoản này');
     if (!payload.start_date || !payload.end_date) return toast('Chọn ngày bắt đầu và kết thúc');
     if (new Date(payload.end_date) < new Date(payload.start_date)) return toast('Ngày kết thúc phải sau ngày bắt đầu');
     if (!payload.days) payload.days = workDays(payload.start_date, payload.end_date);
     if (await upsert('leave_requests', payload, id)) { closeAll(); toast(id ? 'Đã cập nhật đơn' : 'Đã gửi đơn nghỉ, chờ duyệt'); }
   });
-  const sd = $('f_start_date'), ed = $('f_end_date'), dd = $('f_days');
-  const recalc = () => { if (sd.value && ed.value && new Date(ed.value) >= new Date(sd.value)) dd.value = workDays(sd.value, ed.value); };
-  sd.onchange = recalc; ed.onchange = recalc;
+  const sd = $('m_start_date'), ed = $('m_end_date'), dd = $('m_days');
+  if (sd && ed && dd) {
+    const recalc = () => { if (sd.value && ed.value && new Date(ed.value) >= new Date(sd.value)) dd.value = workDays(sd.value, ed.value); };
+    sd.onchange = recalc; ed.onchange = recalc;
+  }
 }
 function balanceEditor() {
   const year = new Date().getFullYear();
@@ -1899,10 +1924,12 @@ const DOC_TYPES = [['cccd', 'CCCD/CMND'], ['hop_dong', 'Hợp đồng đã ký']
   ['so_yeu', 'Sơ yếu lý lịch'], ['kham_suc_khoe', 'Giấy khám sức khoẻ'], ['bhxh', 'Giấy tờ BHXH'], ['khac', 'Khác']];
 async function openEmployeeDocs(empId) {
   const e = state.employees.find(x => x.id === empId); if (!e) return;
-  const [{ data: priv }, { data: docs }] = await Promise.all([
+  const [pv, dc] = await Promise.all([
     sb.from('employee_private').select('*').eq('employee_id', empId).maybeSingle(),
     sb.from('employee_documents').select('*').eq('employee_id', empId).order('uploaded_at', { ascending: false })
   ]);
+  if (pv.error) return toast('Không đọc được hồ sơ cá nhân: ' + pv.error.message + ' — chưa mở form để tránh ghi đè', 8000);
+  const priv = pv.data, docs = dc.data;
   openDrawer('Hồ sơ & giấy tờ — ' + e.full_name, `
     <div class="row2">${fieldsHTML(PRIVATE_SPEC, priv || {}, 'pv')}</div>
     <div class="actions"><button class="btn primary" id="pvSave">Lưu hồ sơ</button></div>
@@ -2042,9 +2069,11 @@ function openRolePerms(key) {
 /* =================== 14. SAO LƯU DỮ LIỆU =================== */
 async function renderBackupPanel() {
   if (!isHR()) return;
+  const token = state.view;
   const { data: snaps } = await sb.from('backups').select('slot, taken_at, row_counts').order('taken_at', { ascending: false }).limit(10);
   const rows = snaps || [];
   const total = (rc) => Object.values(rc || {}).reduce((a, b) => a + Number(b), 0);
+  if (state.view !== token || $('bkNow')) return; // đã đổi tab, hoặc panel đã có
   $('view').insertAdjacentHTML('beforeend', `
     <h2 class="sec" style="margin-top:22px">Sao lưu dữ liệu</h2>
     <div class="panel">
@@ -2105,7 +2134,7 @@ function applyLang(root) {
   root = root || document.body;
   if (root.nodeType === 3) { const v = trText(root.nodeValue); if (v !== root.nodeValue) root.nodeValue = v; return; }
   if (root.nodeType !== 1) return;
-  const skip = { SCRIPT: 1, STYLE: 1 };
+  const skip = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1 };
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: n => (skip[n.parentNode && n.parentNode.nodeName] || !/\S/.test(n.nodeValue))
       ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
