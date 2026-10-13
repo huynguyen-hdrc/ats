@@ -568,7 +568,9 @@ const EMP_SPEC = () => [
   { k: 'full_name', label: 'Họ tên *' },
   { k: 'employee_code', label: 'Mã nhân viên' },
   { k: 'title', label: 'Chức danh' },
+  { k: 'level', label: 'Cấp bậc', type: 'select', opts: [['', '—'], ['Director', 'Director'], ['Manager', 'Manager'], ['Leader', 'Leader'], ['Staff', 'Staff'], ['Intern', 'Intern']] },
   { k: 'department', label: 'Phòng ban' },
+  { k: 'business_unit', label: 'Ngành hàng / BU' },
   { k: 'email', label: 'Email công ty' },
   { k: 'phone', label: 'Điện thoại' },
   { k: 'manager_id', label: 'Quản lý trực tiếp', type: 'select', opts: [['', '— không có —'], ...state.employees.map(e => [e.id, e.full_name + (e.title ? ' (' + e.title + ')' : '')])] },
@@ -631,7 +633,7 @@ function viewOrg() {
     if (seen.has(e.id)) return `<li><div class="node"><b>${esc(e.full_name)}</b><span>vòng lặp quản lý — kiểm tra lại</span></div></li>`;
     seen.add(e.id);
     const ch = kids(e.id);
-    return `<li><div class="node"><b>${esc(e.full_name)}</b><span>${esc([e.title, e.department].filter(Boolean).join(' · '))}</span></div>
+    return `<li><div class="node"><b>${esc(e.full_name)}</b><span>${esc([e.title, e.level, e.department, e.business_unit].filter(Boolean).join(' · '))}</span></div>
       ${ch.length ? `<ul>${ch.map(node).join('')}</ul>` : ''}</li>`;
   };
   const roots = kids(null);
@@ -654,7 +656,7 @@ function viewOnboarding() {
     const late = items.filter(i => !i.done && i.due_date && dayDiff(i.due_date) < 0).length;
     return `<div class="panel" data-emp="${e.id}" style="cursor:pointer">
       <h4>${esc(e.full_name)}</h4>
-      <div class="meta">${esc([e.title, e.department].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
+      <div class="meta">${esc([e.title, e.level, e.department, e.business_unit].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
       ${items.length ? `<div class="bar"><i style="width:${Math.round(done / items.length * 100)}%"></i></div>
         <div class="tags"><span class="tag ${done === items.length ? 'ok' : ''}">${done}/${items.length} xong</span>
         ${late ? `<span class="tag warn">${late} quá hạn</span>` : ''}</div>`
@@ -787,7 +789,7 @@ function viewProbation() {
       const due = e.start_date ? addDays(e.start_date, 60) : null;
       return `<div class="panel" data-rev-emp="${e.id}" style="cursor:pointer">
         <h4>${esc(e.full_name)}</h4>
-        <div class="meta">${esc([e.title, e.department].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
+        <div class="meta">${esc([e.title, e.level, e.department, e.business_unit].filter(Boolean).join(' · '))}${e.start_date ? ' · vào ' + d(e.start_date) : ''}</div>
         <div class="tags" style="margin-top:10px">
           ${due ? `<span class="tag ${dayDiff(due) < 0 ? 'warn' : 'soon'}">hạn đánh giá ${d(due)}</span>` : ''}
           ${last ? `<span class="tag ok">${last.total ?? '-'}/5 · ${esc(RESULT_LABEL[last.result] || 'chưa kết luận')}</span>` : '<span class="tag">chưa đánh giá</span>'}
@@ -856,7 +858,9 @@ const SHEETS = {
       { h: 'Họ tên *', k: 'full_name', req: true },
       { h: 'Mã nhân viên', k: 'employee_code' },
       { h: 'Chức danh', k: 'title' },
+      { h: 'Cấp bậc', k: 'level' },
       { h: 'Phòng ban', k: 'department' },
+      { h: 'Ngành hàng / BU', k: 'business_unit' },
       { h: 'Email', k: 'email' },
       { h: 'Điện thoại', k: 'phone', text: true },
       { h: 'Quản lý trực tiếp (họ tên)', k: 'manager_id', lookup: 'employee' },
@@ -866,7 +870,7 @@ const SHEETS = {
       { h: 'Nơi làm việc', k: 'location' },
       { h: 'Ghi chú', k: 'note' }
     ],
-    sample: ['Nguyễn Văn A', 'NV001', 'Content Executive', 'Marketing', 'a.nguyen@helidirect.com', '0901234567', '', '2026-10-01', 'Full-time', 'Thử việc', 'HCM', '']
+    sample: ['Nguyễn Văn A', 'NV001', 'Content Executive', 'Staff', 'Marketing', 'HEL', 'a.nguyen@helidirect.com', '0901234567', '', '2026-10-01', 'Full-time', 'Thử việc', 'HCM', '']
   },
   candidates: {
     label: 'Ứng viên', table: 'candidates', file: 'ung-vien', importable: true, keyField: 'email',
