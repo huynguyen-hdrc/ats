@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ATS</title>
+<title>HDRC - Human Resource Management</title>
 <style>
 :root{
   --bg:#f3f5f7; --panel:#fff; --line:#e3e8ee; --text:#17212b; --muted:#6b7a8c;
@@ -28,6 +28,7 @@ input,select,textarea{font:inherit;color:inherit}
 /* header */
 header{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
 .logo{font-weight:800;letter-spacing:.5px;font-size:18px}
+.brandsub{color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.2px}
 header select,header input[type=search]{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
 header input[type=search]{width:280px}
 .spacer{flex:1}
@@ -77,7 +78,8 @@ label.check{display:flex;align-items:center;gap:6px;color:var(--muted);font-size
 </head>
 <body>
 <div id="login" class="hide">
-  <h1>ATS</h1>
+  <h1>HDRC</h1>
+  <div class="brandsub" style="margin-bottom:10px">Human Resource Management</div>
   <p>Đăng nhập bằng email công ty. Hệ thống gửi link đăng nhập 1 lần.</p>
   <form id="loginForm">
     <div class="field"><label>Email</label><input type="email" id="loginEmail" required placeholder="ban@helidirect.com"></div>
@@ -88,7 +90,7 @@ label.check{display:flex;align-items:center;gap:6px;color:var(--muted);font-size
 
 <div id="app" class="hide">
   <header>
-    <span class="logo">ATS</span>
+    <span class="logo">HDRC</span><span class="brandsub">Human Resource Management</span>
     <select id="jobFilter"></select>
     <input type="search" id="search" placeholder="Tìm tên, email, skill, công ty...">
     <label class="check"><input type="checkbox" id="showClosed"> Hiện ứng viên đã loại / rút</label>
