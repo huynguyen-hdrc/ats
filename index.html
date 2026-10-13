@@ -258,17 +258,19 @@ function fieldsHTML(spec, v = {}, p = 'f') {
 function readFields(spec, p = 'f') {
   const o = {};
   for (const f of spec) {
-    let v = $(`${p}_${f.k}`).value.trim();
+    const el = $(`${p}_${f.k}`);
+    if (!el) { console.warn('readFields: thiếu ô ' + p + '_' + f.k); o[f.k] = null; continue; }
+    let v = el.value.trim();
     if (f.type === 'number') o[f.k] = v === '' ? null : Number(v);
     else o[f.k] = v === '' ? null : v;
   }
   return o;
 }
 function formModal(title, spec, values, onSave) {
-  openModal(title, `<div class="row2">${fieldsHTML(spec, values)}</div>
+  openModal(title, `<div class="row2">${fieldsHTML(spec, values, 'm')}</div>
     <div class="actions"><button class="btn" id="fCancel">Huỷ</button><button class="btn primary" id="fSave">Lưu</button></div>`);
   $('fCancel').onclick = closeAll;
-  $('fSave').onclick = async () => { await onSave(readFields(spec)); };
+  $('fSave').onclick = async () => { await onSave(readFields(spec, 'm')); };
 }
 async function upsert(table, payload, id) {
   const r = id ? await sb.from(table).update(payload).eq('id', id) : await sb.from(table).insert(payload);
@@ -283,7 +285,10 @@ async function removeRow(table, id, label) {
 }
 
 /* ---------- overlays ---------- */
-function closeAll() { $('drawer').classList.remove('on'); $('modal').classList.remove('on'); $('scrim').classList.remove('on'); }
+function closeAll() {
+  $('drawer').classList.remove('on'); $('modal').classList.remove('on'); $('scrim').classList.remove('on');
+  $('mBody').innerHTML = ''; $('dBody').innerHTML = '';
+}
 function openModal(title, html) { $('mTitle').textContent = title; $('mBody').innerHTML = html; $('modal').classList.add('on'); $('scrim').classList.add('on'); }
 function openDrawer(title, html) { $('dName').textContent = title; $('dBody').innerHTML = html; $('drawer').classList.add('on'); $('scrim').classList.add('on'); }
 $('scrim').onclick = closeAll; $('dClose').onclick = closeAll;
