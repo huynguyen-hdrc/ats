@@ -41,7 +41,7 @@ iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
     <div><b id="kFail">–</b><span class="sub">Lỗi</span></div>
     <div><b id="kWarn">–</b><span class="sub">Cảnh báo</span></div>
     <div><b id="kTime">–</b><span class="sub">Thời gian</span></div>
-    <div><b id="kBuild">20261013-1856</b><span class="sub">Phiên bản bộ test</span></div>
+    <div><b id="kBuild">20261014-0240</b><span class="sub">Phiên bản bộ test</span></div>
   </div>
   <table id="out"><thead><tr><th style="width:60px">KQ</th><th>Hạng mục</th><th>Chi tiết</th></tr></thead><tbody></tbody></table>
   <div id="log"></div>
@@ -49,7 +49,7 @@ iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
 </main>
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.117.3';
-const URL_ = 'https://hzsybxvvcexayducvfll.supabase.co', KEY = 'sb_publishable_jcQmXzefhryIcE7GLn-_8g_WcQCbBSK';
+const URL_ = 'https://hzsybxvvcexayducvfll.supabase.co', KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6c3lieHZ2Y2V4YXlkdWN2ZmxsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NTMxMTQsImV4cCI6MjEwMDEyOTExNH0.Fk_dc8nYfJGwlrbEwVSIpoFIM3WeHUPzXKP38jsM9Ac';
 const sb = createClient(URL_, KEY);
 const TAG = '[SELFTEST]';
 const results = [];
@@ -88,6 +88,13 @@ const ins = async (table, row) => {
   return data;
 };
 
+let _xl;
+const loadXLSX = () => _xl || (_xl = window.XLSX ? Promise.resolve(window.XLSX) : new Promise((res, rej) => {
+  const sc = document.createElement('script');
+  sc.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+  sc.onload = () => res(window.XLSX); sc.onerror = () => rej(new Error('không tải được thư viện Excel'));
+  document.head.appendChild(sc);
+}));
 async function runAll() {
   results.length = 0; $('log').textContent = ''; draw();
   const t0 = Date.now();
@@ -467,12 +474,7 @@ async function runAll() {
     return 'Screening → screening, kỹ năng tách thành 2';
   });
   await t('Xuất ra Excel rồi nhập lại không sai lệch dữ liệu', async () => {
-    const XLSX = await new Promise((res, rej) => {
-      const sc = document.createElement('script');
-      sc.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
-      sc.onload = () => res(window.XLSX); sc.onerror = () => rej(new Error('không tải được thư viện Excel'));
-      document.head.appendChild(sc);
-    });
+    const XLSX = await loadXLSX();
     const cols = W().__hdrc.SHEETS.employees.cols;
     const src = { full_name: 'Vong Lap Test', title: 'Staff', department: 'QA', email: 'vl@test.com',
       phone: '0901234567', manager_id: mgr.id, start_date: '2026-10-01', employment_type: 'Full-time',
@@ -491,6 +493,68 @@ async function runAll() {
     }
     assert(String(got.phone) === '0901234567', 'số điện thoại bị đổi: ' + got.phone);
     return 'ghi file thật → đọc lại → 9 trường khớp nguyên vẹn';
+  });
+  await t('Ô Excel định dạng SỐ không làm mất số 0 đầu của điện thoại', async () => {
+    const XLSX = await loadXLSX();
+    const ws = XLSX.utils.aoa_to_sheet([['Họ tên *', 'Điện thoại', 'Mã nhân viên'], ['Zero Test', 901234567, 1]]);
+    ws.B2.z = '0000000000'; ws.C2.z = '000';     // Excel hiển thị 0901234567 / 001
+    const back = XLSX.read(XLSX.write((() => { const w = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(w, ws, 'S'); return w; })(), { bookType: 'xlsx', type: 'array' }), { cellDates: true });
+    const raw = XLSX.utils.sheet_to_json(back.Sheets.S, { header: 1, raw: true, defval: '' });
+    const shown = XLSX.utils.sheet_to_json(back.Sheets.S, { header: 1, raw: false, defval: '' });
+    const r = W().__hdrc.parseAoa('employees', raw, shown);
+    assert(!r.errors.length, JSON.stringify(r.errors));
+    assert(r.rows[0].phone === '0901234567', 'điện thoại = ' + JSON.stringify(r.rows[0].phone));
+    assert(r.rows[0].employee_code === '001', 'mã nhân viên = ' + JSON.stringify(r.rows[0].employee_code));
+    return 'giữ nguyên 0901234567 và 001';
+  });
+  await t('Số di động mất hẳn số 0 vẫn được vá lại', async () => {
+    const { xlText } = W().__hdrc;
+    assert(xlText({ k: 'phone' }, 901234567, '901234567') === '0901234567', 'không vá được');
+    assert(xlText({ k: 'phone' }, '+84912345678', '+84912345678') === '0912345678', '+84 sai');
+    assert(xlText({ k: 'phone' }, '0281234567', '0281234567') === '0281234567', 'số bàn bị đổi');
+    return '901234567 → 0901234567, +84… → 0…, số bàn giữ nguyên';
+  });
+  await t('Hai nhân sự trùng tên: báo lỗi thay vì chọn bừa dòng đầu', async () => {
+    const code = TAG.replace(/\W/g, '') + '-TWIN';
+    const twin = await ins('employees', { full_name: mgr.full_name, employee_code: code, title: 'Manager', department: 'QA2', status: 'active' });
+    await W().__hdrcReload?.();
+    const bad = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Quản lý trực tiếp (họ tên)'], ['Nhan vien moi 2', mgr.full_name]]);
+    assert(bad.errors.length, 'vẫn chọn bừa một người!');
+    const good = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Quản lý trực tiếp (họ tên)'], ['Nhan vien moi 2', `${mgr.full_name} (${code})`]]);
+    const okRef = good.rows.length && good.rows[0].manager_id;
+    await sb.from('employees').delete().eq('id', twin.id);
+    made.employees = made.employees.filter(x => x !== twin.id);
+    await W().__hdrcReload?.();
+    assert(okRef, 'ghi rõ mã/phòng ban vẫn không tách được: ' + JSON.stringify(good.errors));
+    return 'trùng tên → lỗi rõ ràng; ghi "Tên (phân biệt)" thì nhận đúng người';
+  });
+  await t('Vị trí trùng tên ở hai phòng ban không ghi đè nhau', async () => {
+    const k = W().__hdrc.SHEETS.jobs.keyOf;
+    assert(typeof k === 'function', 'vị trí chưa có khoá so trùng');
+    const a = k({ title: 'Content Executive', department: 'Marketing' });
+    const b = k({ title: 'Content Executive', department: 'Sales' });
+    assert(a && a !== b, `khoá trùng nhau: "${a}" vs "${b}"`);
+    assert(k({ title: 'Content Executive', department: 'marketing' }) === a, 'khoá phân biệt hoa thường');
+    return 'khoá = tên vị trí + phòng ban';
+  });
+
+  /* ---------- F2. Ngày tháng theo giờ Việt Nam ---------- */
+  group = 'F2. Ngày tháng (múi giờ)';
+  await t('today() lấy ngày theo máy người dùng, không theo UTC', async () => {
+    const { today } = W().__hdrc;
+    const n = new Date();
+    const local = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    assert(today() === local, `today()=${today()} ≠ ngày máy ${local}`);
+    return today() + (today() !== n.toISOString().slice(0, 10) ? ' (UTC đang là ngày khác — đúng chỗ dễ sai nhất)' : '');
+  });
+  await t('dayDiff và addDays tính đúng quanh mốc tháng/năm', async () => {
+    const { dayDiff, addDays, today } = W().__hdrc;
+    assert(dayDiff(today()) === 0, 'hôm nay phải là 0, đang là ' + dayDiff(today()));
+    assert(dayDiff(addDays(today(), 7)) === 7, '+7 sai: ' + dayDiff(addDays(today(), 7)));
+    assert(dayDiff(addDays(today(), -3)) === -3, '-3 sai: ' + dayDiff(addDays(today(), -3)));
+    assert(addDays('2026-02-28', 1) === '2026-03-01', 'năm nhuận sai: ' + addDays('2026-02-28', 1));
+    assert(addDays('2026-12-31', 1) === '2027-01-01', 'sang năm sai: ' + addDays('2026-12-31', 1));
+    return 'hôm nay=0 · +7 · -3 · 28/02→01/03 · 31/12→01/01';
   });
 
   /* ---------- G. Offer letter & email ---------- */
