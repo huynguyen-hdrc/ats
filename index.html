@@ -114,6 +114,63 @@ table.grid tbody tr:hover{background:#fcfcfc;cursor:pointer}
 .checklist li{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line-soft)}
 .checklist li.done span.t{text-decoration:line-through;color:var(--muted)}
 .checklist input{margin-top:3px}
+
+/* ---------- CHUYỂN ĐỘNG ---------- */
+@keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes itemIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes rowIn{from{opacity:0}to{opacity:1}}
+@keyframes pop{0%{transform:scale(.96)}60%{transform:scale(1.015)}100%{transform:scale(1)}}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,14px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes modalIn{from{opacity:0;transform:translate(-50%,-50%) scale(.97)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes overPulse{0%,100%{background:#ededed}50%{background:#e4e4e4}}
+@keyframes barGrow{from{width:0}}
+
+.vin{animation:viewIn .22s cubic-bezier(.2,.7,.3,1)}
+.cards > *{animation:itemIn .3s cubic-bezier(.2,.7,.3,1) backwards}
+.cards > *:nth-child(1){animation-delay:0ms}   .cards > *:nth-child(2){animation-delay:35ms}
+.cards > *:nth-child(3){animation-delay:70ms}  .cards > *:nth-child(4){animation-delay:105ms}
+.cards > *:nth-child(5){animation-delay:140ms} .cards > *:nth-child(6){animation-delay:175ms}
+.cards > *:nth-child(n+7){animation-delay:200ms}
+table.grid tbody tr{animation:rowIn .28s ease-out backwards}
+table.grid tbody tr:nth-child(1){animation-delay:0ms}  table.grid tbody tr:nth-child(2){animation-delay:20ms}
+table.grid tbody tr:nth-child(3){animation-delay:40ms} table.grid tbody tr:nth-child(4){animation-delay:60ms}
+table.grid tbody tr:nth-child(5){animation-delay:80ms} table.grid tbody tr:nth-child(n+6){animation-delay:95ms}
+table.grid tbody tr{transition:background .15s ease}
+
+nav{position:relative}
+nav button{transition:color .18s ease}
+nav button.on{border-bottom-color:transparent}
+.nav-ind{position:absolute;bottom:0;left:0;height:2px;width:0;background:var(--ink);opacity:0;border-radius:2px;
+  transition:transform .28s cubic-bezier(.4,0,.2,1),width .28s cubic-bezier(.4,0,.2,1),opacity .18s ease;pointer-events:none}
+
+.btn{transition:background .15s ease,border-color .15s ease,color .15s ease,transform .08s ease,box-shadow .15s ease}
+.btn:active{transform:translateY(1px)}
+.btn.primary:hover{box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.tag{transition:background .15s ease,border-color .15s ease}
+
+.card{transition:border-color .15s ease,box-shadow .18s ease,transform .18s cubic-bezier(.2,.7,.3,1),opacity .15s ease}
+.card:hover{box-shadow:0 2px 10px rgba(0,0,0,.06);transform:translateY(-1px)}
+.card.dragging{opacity:.5;transform:rotate(-1.6deg) scale(.985);box-shadow:0 10px 22px rgba(0,0,0,.14);cursor:grabbing}
+.card.landed{animation:pop .34s cubic-bezier(.2,.7,.3,1)}
+.col{transition:background .18s ease,outline-color .18s ease}
+.col.over{animation:overPulse 1s ease-in-out infinite}
+.col.over .card{transform:translateY(1px)}
+
+.panel{transition:border-color .15s ease,box-shadow .18s ease}
+.bar > i{transition:width .55s cubic-bezier(.2,.8,.2,1);animation:barGrow .55s cubic-bezier(.2,.8,.2,1)}
+.toast.on{animation:toastIn .24s cubic-bezier(.2,.7,.3,1)}
+.modal.on{animation:modalIn .2s cubic-bezier(.2,.7,.3,1)}
+.scrim{transition:opacity .18s ease}
+.field input,.field select,.field textarea{transition:border-color .15s ease,box-shadow .15s ease}
+.sum{transition:transform .18s cubic-bezier(.2,.7,.3,1)}
+.sum:hover{transform:translateY(-2px)}
+.node{transition:border-color .15s ease,transform .18s ease}
+.node:hover{transform:translateY(-1px);border-color:var(--ink)}
+.checklist li{transition:opacity .2s ease}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
 </style>
 </head>
 <body>
@@ -326,11 +383,26 @@ function render() {
     return `<button data-v="${k}" class="${state.view === k ? 'on' : ''}">${l}${badge}</button>`;
   }).join('');
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.v; state.q = ''; render(); });
+  moveNavInd();
   ({ pipeline: viewPipeline, jobs: viewJobs, people: viewPeople, org: viewOrg,
      newhire: viewNewHires, mail: viewMail,
      dash: viewDash, leave: viewLeave, settings: viewSettings })[state.view]();
   wireXlsx();
+  const v = $('view'); v.classList.remove('vin'); void v.offsetWidth; v.classList.add('vin');
+  requestAnimationFrame(moveNavInd);
 }
+function moveNavInd() {
+  const nav = $('nav'); if (!nav) return;
+  let ind = nav.querySelector('.nav-ind');
+  if (!ind) { ind = document.createElement('i'); ind.className = 'nav-ind'; nav.appendChild(ind); }
+  const b = nav.querySelector('button.on');
+  if (!b) { ind.style.opacity = '0'; return; }
+  ind.style.opacity = '1';
+  ind.style.width = b.offsetWidth + 'px';
+  ind.style.transform = `translateX(${b.offsetLeft}px)`;
+}
+window.addEventListener('resize', () => moveNavInd());
+
 function searchBox(ph) {
   return `<input type="search" id="tq" placeholder="${esc(ph)}" value="${esc(state.q)}">`;
 }
@@ -419,6 +491,10 @@ function viewPipeline() {
       const c = state.candidates.find(x => x.id === id);
       if (!c || c.stage === stage) return;
       const prev = c.stage; c.stage = stage; c.stage_changed_at = new Date().toISOString(); render();
+      requestAnimationFrame(() => {
+        const moved = document.querySelector(`.card[data-id="${id}"]`);
+        if (moved) { moved.classList.add('landed'); setTimeout(() => moved.classList.remove('landed'), 400); }
+      });
       const { error } = await sb.from('candidates').update({ stage }).eq('id', id);
       if (error) { c.stage = prev; render(); toast('Không đổi được vòng: ' + error.message, 6000); }
       else toast(c.full_name + ' → ' + state.stages.find(s => s.key === stage).label);
@@ -2057,7 +2133,7 @@ function setLang(l) {
 { const b = $('btnLang'); if (b) b.textContent = LANG === 'en' ? 'VI' : 'EN'; }
 if (LANG === 'en') { document.documentElement.lang = 'en'; applyLang(document.body); }
 
-window.__hdrcHR = { workDays, can, isHR, VIEWS, ROLE_LABEL };
+window.__hdrcHR = { workDays, can, isHR, VIEWS, ROLE_LABEL, moveNavInd };
 
 /* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (_e, session) => { await boot(session); });
