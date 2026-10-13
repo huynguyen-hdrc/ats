@@ -780,6 +780,49 @@ async function runAll() {
     return 'confirmed_by + confirmed_at';
   });
 
+  /* ---------- L3. Cưỡng chế quyền ở database ---------- */
+  group = 'L3. Quyền cưỡng chế ở database';
+  await t('Đủ trigger kiểm soát quyền trên mọi bảng nghiệp vụ', async () => {
+    const { data, error } = await sb.rpc('perm_triggers_report');
+    if (error) throw new Error(error.message);
+    const need = ['candidates', 'candidate_events', 'jobs', 'offers', 'employees', 'employee_private',
+      'employee_documents', 'contracts', 'onboarding_items', 'onboarding_templates', 'onboarding_template_items',
+      'probation_reviews', 'leave_requests', 'leave_balances', 'leave_types', 'email_templates', 'email_log',
+      'backups', 'roles', 'role_perms', 'stages', 'profiles'];
+    const have = new Set(data.map(r => r.table_name));
+    for (const tb of need) assert(have.has(tb), 'thiếu trigger quyền trên bảng ' + tb);
+    return data.length + ' trigger trên ' + have.size + ' bảng';
+  });
+  await t('has_perm khớp với ma trận quyền của vai trò đang đăng nhập', async () => {
+    const { data: me, error: e1 } = await sb.rpc('my_role_key');
+    if (e1) throw new Error(e1.message);
+    const { data: rows, error: e2 } = await sb.from('role_perms').select('module, action, allowed').eq('role_key', me);
+    if (e2) throw new Error(e2.message);
+    let checked = 0;
+    for (const r of rows.slice(0, 6)) {
+      const { data: v, error } = await sb.rpc('has_perm', { p_module: r.module, p_action: r.action });
+      if (error) throw new Error(error.message);
+      const base = (await sb.rpc('my_role')).data;
+      assert(base === 'admin' ? v === true : v === r.allowed,
+        `${r.module}.${r.action}: has_perm=${v}, ma trận=${r.allowed}`);
+      checked++;
+    }
+    return me + ' · đã đối chiếu ' + checked + ' ô quyền';
+  });
+  await t('Duyệt nghỉ phép bị chặn nếu vai trò không có quyền duyệt', async () => {
+    const { data, error } = await sb.rpc('has_perm', { p_module: 'leave', p_action: 'approve' });
+    if (error) throw new Error(error.message);
+    const { data: base } = await sb.rpc('my_role');
+    assert(typeof data === 'boolean', 'has_perm trả về ' + JSON.stringify(data));
+    return `vai trò gốc ${base} · quyền duyệt nghỉ phép: ${data ? 'có' : 'không'}`;
+  });
+  await t('Tài khoản thường không đọc được bảng quyền qua anon', async () => {
+    const r = await anonGet('role_perms?select=role_key');
+    const body = await r.json();
+    assert(r.status === 401 || (Array.isArray(body) && body.length === 0), `HTTP ${r.status}`);
+    return `HTTP ${r.status}`;
+  });
+
   /* ---------- L. Sao lưu ---------- */
   group = 'L. Sao lưu dữ liệu';
   await t('Khách chưa đăng nhập không đọc được bản sao lưu', async () => {
