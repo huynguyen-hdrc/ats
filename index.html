@@ -306,7 +306,16 @@ function searchBox(ph) {
 }
 function wireSearch() {
   const i = $('tq'); if (!i) return;
-  i.oninput = e => { state.q = e.target.value; render(); i.focus(); };
+  i.oninput = e => {
+    state.q = e.target.value;
+    const pos = e.target.selectionStart;
+    render();
+    const n = $('tq');
+    if (n && document.activeElement !== n) {
+      n.focus();
+      try { n.setSelectionRange(pos, pos); } catch (err) { }
+    }
+  };
 }
 const hit = (obj, keys) => {
   const q = state.q.toLowerCase().trim();
