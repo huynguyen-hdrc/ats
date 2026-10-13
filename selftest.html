@@ -338,12 +338,16 @@ async function runAll() {
       setTimeout(() => rej(new Error('quá 20s không tải xong')), 20000);
     });
     const w = frame.contentWindow;
-    for (let i = 0; i < 40; i++) {
-      if (w.document.getElementById('app') && !w.document.getElementById('app').classList.contains('hide')) break;
+    // chờ tới khi app đã render xong nav, không chỉ hiện khung
+    let n = 0;
+    for (let i = 0; i < 60; i++) {
+      n = w.document.querySelectorAll('nav button').length;
+      if (n >= 7) break;
       await new Promise(r => setTimeout(r, 500));
     }
     assert(!w.document.getElementById('app').classList.contains('hide'), 'app không hiện (chưa đăng nhập?)');
-    return 'đăng nhập OK';
+    assert(n >= 7, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
+    return 'đăng nhập + render OK';
   });
   const tabs = ['Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding', 'Hợp đồng', 'Thử việc'];
   await t('Đủ 7 tab chức năng', async () => {
@@ -359,6 +363,7 @@ async function runAll() {
       const errs = [];
       w.onerror = (m) => errs.push(String(m));
       const btn = [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === name);
+      assert(btn, 'không tìm thấy tab ' + name);
       btn.click();
       await new Promise(r => setTimeout(r, 450));
       const v = w.document.getElementById('view');
