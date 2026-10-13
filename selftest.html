@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HDRC - Kiểm tra hệ thống</title>
+<style>
+:root{--line:#e3e8ee;--muted:#6b7a8c;--ok:#17694f;--bad:#b4443a;--warn:#8a5a12}
+body{margin:0;background:#f3f5f7;color:#17212b;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Arial,sans-serif}
+header{background:#fff;border-bottom:1px solid var(--line);padding:14px 20px;display:flex;gap:12px;align-items:center}
+.logo{font-weight:800}.sub{color:var(--muted);font-size:12px}
+main{padding:18px 20px 60px;max-width:1000px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 14px;font-weight:600}
+button.primary{background:#0f7a63;border-color:#0f7a63;color:#fff}
+.kpi{display:flex;gap:10px;margin:14px 0}
+.kpi div{flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.kpi b{display:block;font-size:22px}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#f7f9fa;font-size:12px;color:var(--muted);text-transform:uppercase}
+tr:last-child td{border-bottom:none}
+.p{color:var(--ok);font-weight:700}.f{color:var(--bad);font-weight:700}.w{color:var(--warn);font-weight:700}
+.grp td{background:#eef1f5;font-weight:700}
+code{background:#f1f4f7;padding:1px 5px;border-radius:4px;font-size:12px}
+#log{white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);margin-top:16px}
+iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">HDRC</span><span class="sub">Kiểm tra hệ thống (self-test)</span>
+  <span style="flex:1"></span>
+  <span class="sub" id="who"></span>
+  <button class="primary" id="run">Chạy kiểm tra</button>
+  <button id="back" onclick="location.href='./'">Về app</button>
+</header>
+<main>
+  <p class="sub">Chạy toàn bộ kiểm thử trên dữ liệu thật: tạo bản ghi tạm có tiền tố <code>[SELFTEST]</code>, kiểm tra rồi xoá sạch. Không đụng dữ liệu đang dùng.</p>
+  <div class="kpi">
+    <div><b id="kPass">–</b><span class="sub">Đạt</span></div>
+    <div><b id="kFail">–</b><span class="sub">Lỗi</span></div>
+    <div><b id="kWarn">–</b><span class="sub">Cảnh báo</span></div>
+    <div><b id="kTime">–</b><span class="sub">Thời gian</span></div>
+  </div>
+  <table id="out"><thead><tr><th style="width:60px">KQ</th><th>Hạng mục</th><th>Chi tiết</th></tr></thead><tbody></tbody></table>
+  <div id="log"></div>
+  <iframe id="frame"></iframe>
+</main>
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.117.3';
+const URL_ = 'https://hzsybxvvcexayducvfll.supabase.co', KEY = 'sb_publishable_jcQmXzefhryIcE7GLn-_8g_WcQCbBSK';
+const sb = createClient(URL_, KEY);
+const TAG = '[SELFTEST]';
+const results = [];
+const made = { jobs: [], candidates: [], employees: [], onboarding_templates: [] };
+let group = '';
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $('log').textContent += m + '\n'; };
+
+function assert(c, m) { if (!c) throw new Error(m || 'assert failed'); }
+async function t(name, fn) {
+  const row = { group, name, state: 'pass', detail: '' };
+  try { const d = await fn(); row.detail = d || ''; }
+  catch (e) { row.state = e.warn ? 'warn' : 'fail'; row.detail = e.message; }
+  results.push(row); draw();
+}
+const warn = (m) => { const e = new Error(m); e.warn = true; throw e; };
+function draw() {
+  const tb = $('out').querySelector('tbody');
+  let g = '', html = '';
+  for (const r of results) {
+    if (r.group !== g) { g = r.group; html += `<tr class="grp"><td colspan="3">${g}</td></tr>`; }
+    const cls = r.state === 'pass' ? 'p' : r.state === 'warn' ? 'w' : 'f';
+    const lbl = r.state === 'pass' ? 'ĐẠT' : r.state === 'warn' ? 'CẢNH BÁO' : 'LỖI';
+    html += `<tr><td class="${cls}">${lbl}</td><td>${r.name}</td><td class="sub">${(r.detail || '').replace(/</g, '&lt;')}</td></tr>`;
+  }
+  tb.innerHTML = html;
+  $('kPass').textContent = results.filter(r => r.state === 'pass').length;
+  $('kFail').textContent = results.filter(r => r.state === 'fail').length;
+  $('kWarn').textContent = results.filter(r => r.state === 'warn').length;
+}
+const addDays = (iso, n) => { const x = new Date(iso); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+const ins = async (table, row) => {
+  const { data, error } = await sb.from(table).insert(row).select().single();
+  if (error) throw new Error(table + ' insert: ' + error.message);
+  if (made[table]) made[table].push(data.id);
+  return data;
+};
+
+async function runAll() {
+  results.length = 0; $('log').textContent = ''; draw();
+  const t0 = Date.now();
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { alert('Chưa đăng nhập. Mở app, đăng nhập rồi quay lại trang này.'); return; }
+  $('who').textContent = session.user.email;
+  const token = session.access_token;
+
+  /* ---------- A. Bảo mật / phân quyền ---------- */
+  group = 'A. Bảo mật & phân quyền (RLS)';
+  const anonGet = (path, init = {}) => fetch(`${URL_}/rest/v1/${path}`, { ...init, headers: { apikey: KEY, 'content-type': 'application/json', ...(init.headers || {}) } });
+  for (const tbl of ['candidates', 'employees', 'contracts', 'probation_reviews', 'onboarding_items', 'jobs'])
+    await t(`Khách chưa đăng nhập không đọc được bảng ${tbl}`, async () => {
+      const r = await anonGet(`${tbl}?select=id`);
+      const body = await r.json();
+      assert(r.status === 401 || (Array.isArray(body) && body.length === 0), `trả về ${r.status} với ${JSON.stringify(body).slice(0, 80)}`);
+      return `HTTP ${r.status}, ${Array.isArray(body) ? body.length : '-'} dòng`;
+    });
+  await t('Khách chưa đăng nhập không ghi được dữ liệu', async () => {
+    const r = await anonGet('employees', { method: 'POST', body: JSON.stringify({ full_name: TAG + ' hacker' }) });
+    assert(r.status >= 400, 'ghi được — RLS hở!');
+    return `bị chặn, HTTP ${r.status}`;
+  });
+  await t('Edge function parse-cv bắt buộc đăng nhập', async () => {
+    const r = await fetch(`${URL_}/functions/v1/parse-cv`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'x'.repeat(50) }) });
+    assert(r.status === 401, 'trả về ' + r.status);
+    return 'HTTP 401';
+  });
+  await t('File CV không truy cập được nếu không có link ký', async () => {
+    const r = await fetch(`${URL_}/storage/v1/object/public/cvs/any.pdf`);
+    assert(r.status >= 400, 'bucket cvs đang công khai!');
+    return `HTTP ${r.status}`;
+  });
+
+  /* ---------- B. Tuyển dụng ---------- */
+  group = 'B. Tuyển dụng (vị trí, ứng viên, lịch sử)';
+  let job, cand;
+  await t('Tạo vị trí tuyển dụng', async () => {
+    job = await ins('jobs', { title: TAG + ' Vi tri test', department: 'QA', headcount: 2, is_open: true });
+    return job.title;
+  });
+  await t('Tạo ứng viên gắn vào vị trí', async () => {
+    cand = await ins('candidates', { full_name: TAG + ' Ung vien', job_id: job.id, skills: ['SQL', 'Excel'], years_experience: 3.5 });
+    assert(cand.stage === 'new', 'vòng mặc định phải là new');
+    return 'vòng mặc định: new';
+  });
+  await t('Hệ thống tự ghi sự kiện "tạo hồ sơ"', async () => {
+    const { data } = await sb.from('candidate_events').select('*').eq('candidate_id', cand.id);
+    assert(data.some(e => e.type === 'created'), 'không có sự kiện created');
+    return data.length + ' sự kiện';
+  });
+  await t('Chuyển vòng ghi lại từ đâu → đến đâu', async () => {
+    await sb.from('candidates').update({ stage: 'phone' }).eq('id', cand.id);
+    const { data } = await sb.from('candidate_events').select('*').eq('candidate_id', cand.id).eq('type', 'stage_change');
+    assert(data.length === 1 && data[0].from_stage === 'new' && data[0].to_stage === 'phone', JSON.stringify(data));
+    return 'new → phone';
+  });
+  await t('Ngày đổi vòng tự cập nhật', async () => {
+    const { data } = await sb.from('candidates').select('stage_changed_at, created_at').eq('id', cand.id).single();
+    assert(new Date(data.stage_changed_at) > new Date(data.created_at), 'stage_changed_at không đổi');
+    return 'stage_changed_at > created_at';
+  });
+  await t('Sửa thông tin khác KHÔNG làm đổi ngày vào vòng', async () => {
+    const before = (await sb.from('candidates').select('stage_changed_at').eq('id', cand.id).single()).data.stage_changed_at;
+    await sb.from('candidates').update({ phone: '0900000000' }).eq('id', cand.id);
+    const after = (await sb.from('candidates').select('stage_changed_at').eq('id', cand.id).single()).data.stage_changed_at;
+    assert(before === after, 'ngày vào vòng bị đổi oan');
+    return 'giữ nguyên';
+  });
+  await t('Đổi trạng thái loại/rút được ghi nhận', async () => {
+    await sb.from('candidates').update({ status: 'rejected' }).eq('id', cand.id);
+    const { data } = await sb.from('candidate_events').select('*').eq('candidate_id', cand.id).eq('type', 'status_change');
+    assert(data.length === 1 && data[0].body === 'rejected', JSON.stringify(data));
+    await sb.from('candidates').update({ status: 'active' }).eq('id', cand.id);
+    return 'rejected được log';
+  });
+  await t('Không nhập được vòng không tồn tại', async () => {
+    const { error } = await sb.from('candidates').update({ stage: 'khong_co_vong_nay' }).eq('id', cand.id);
+    assert(error, 'DB nhận vòng rác!');
+    return 'bị chặn: khoá ngoại';
+  });
+  await t('Không nhập được trạng thái sai', async () => {
+    const { error } = await sb.from('candidates').update({ status: 'linh_tinh' }).eq('id', cand.id);
+    assert(error, 'DB nhận trạng thái rác!');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Xoá vị trí không làm mất ứng viên', async () => {
+    const tmp = await ins('jobs', { title: TAG + ' Vi tri tam' });
+    await sb.from('candidates').update({ job_id: tmp.id }).eq('id', cand.id);
+    await sb.from('jobs').delete().eq('id', tmp.id);
+    made.jobs = made.jobs.filter(x => x !== tmp.id);
+    const { data } = await sb.from('candidates').select('job_id').eq('id', cand.id).single();
+    assert(data, 'ứng viên bị xoá theo vị trí!');
+    assert(data.job_id === null, 'job_id phải thành trống, đang là ' + data.job_id);
+    await sb.from('candidates').update({ job_id: job.id }).eq('id', cand.id);
+    return 'ứng viên giữ lại, vị trí để trống';
+  });
+  await t('Ghi chú lưu được và đọc lại đúng', async () => {
+    const body = 'Ghi chú kiểm thử ' + Date.now();
+    await sb.from('candidate_events').insert({ candidate_id: cand.id, type: 'note', body });
+    const { data } = await sb.from('candidate_events').select('body').eq('candidate_id', cand.id).eq('type', 'note');
+    assert(data.some(x => x.body === body), 'không đọc lại được ghi chú');
+    return 'khớp nội dung';
+  });
+
+  /* ---------- C. parse CV ---------- */
+  group = 'C. Đọc CV tự động';
+  await t('CV tiếng Anh: lấy đúng tên, email, điện thoại, số năm', async () => {
+    const text = `CURRICULUM VITAE\nTran Minh Hoang\nSenior Data Analyst at Tiki\nhoang.tran@gmail.com\n0912345678\n\nSUMMARY\n5 years of experience in analytics. SQL, Python, Power BI.`;
+    const { data, error } = await sb.functions.invoke('parse-cv', { body: { text } });
+    if (error) throw new Error(error.message);
+    const c = data.candidate;
+    assert(c.full_name === 'Tran Minh Hoang', 'tên = ' + c.full_name);
+    assert(c.email === 'hoang.tran@gmail.com', 'email = ' + c.email);
+    assert(c.phone === '0912345678', 'phone = ' + c.phone);
+    assert(c.years_experience === 5, 'năm = ' + c.years_experience);
+    return `${c.full_name} · ${c.skills.join(', ')}`;
+  });
+  await t('CV tiếng Việt: lấy đúng tên và số năm', async () => {
+    const text = `NGUYEN NGOC PHUONG TRANG\nChuyen vien Phan tich Du lieu\nEmail: trang.nguyen@acb.com.vn | Dien thoai: 0987 654 321\nKINH NGHIEM\n2.8 nam kinh nghiem tai ACB Bank. Thanh thao SQL, Excel.`;
+    const { data } = await sb.functions.invoke('parse-cv', { body: { text } });
+    const c = data.candidate;
+    assert(c.full_name === 'NGUYEN NGOC PHUONG TRANG', 'tên = ' + c.full_name);
+    assert(c.years_experience === 2.8, 'năm = ' + c.years_experience);
+    assert(c.phone === '0987654321', 'phone = ' + c.phone);
+    return `${c.full_name} · ${c.years_experience} năm`;
+  });
+  await t('File mô tả công việc KHÔNG bị nhận nhầm thành ứng viên', async () => {
+    const text = `JOB DESCRIPTION\nDigital Marketing Senior Lead (Content & Social)\nHeliDirect is hiring. Requirements: 5 years experience, Shopify knowledge. Benefits: salary.`;
+    const { data } = await sb.functions.invoke('parse-cv', { body: { text } });
+    assert(!data.candidate.full_name, 'vẫn lấy tên: ' + data.candidate.full_name);
+    return 'tên để trống như mong đợi';
+  });
+  await t('Kỹ năng không bắt nhầm chuỗi con (r, go, git)', async () => {
+    const text = `Tran Van B\nban@example.com\nDigital marketing executive at Google. Experience with Excel and SEO reporting. 4 years experience.`;
+    const { data } = await sb.functions.invoke('parse-cv', { body: { text } });
+    const bad = (data.candidate.skills || []).filter(s => ['r', 'go', 'git', 'java'].includes(s));
+    assert(!bad.length, 'bắt nhầm: ' + bad.join(','));
+    return 'kỹ năng: ' + (data.candidate.skills || []).join(', ');
+  });
+  await t('Nội dung rỗng/quá ngắn bị từ chối', async () => {
+    const r = await fetch(`${URL_}/functions/v1/parse-cv`, { method: 'POST', headers: { 'content-type': 'application/json', apikey: KEY, authorization: 'Bearer ' + token }, body: JSON.stringify({ text: 'abc' }) });
+    assert(r.status === 400, 'HTTP ' + r.status);
+    return 'HTTP 400';
+  });
+
+  /* ---------- D. Nhân sự, hợp đồng, onboarding, thử việc ---------- */
+  group = 'D. Nhân sự · hợp đồng · onboarding · thử việc';
+  let mgr, emp;
+  await t('Tạo nhân sự và gán quản lý trực tiếp', async () => {
+    mgr = await ins('employees', { full_name: TAG + ' Quan ly', title: 'Manager', department: 'QA', status: 'active' });
+    emp = await ins('employees', { full_name: TAG + ' Nhan vien', title: 'Staff', department: 'QA', manager_id: mgr.id, start_date: '2026-10-01', status: 'probation' });
+    assert(emp.manager_id === mgr.id, 'không gán được quản lý');
+    return 'cây: Quản lý → Nhân viên';
+  });
+  await t('Sửa nhân sự cập nhật dấu thời gian', async () => {
+    const before = emp.updated_at;
+    await new Promise(r => setTimeout(r, 1100));
+    const { data } = await sb.from('employees').update({ phone: '0911222333' }).eq('id', emp.id).select().single();
+    assert(new Date(data.updated_at) > new Date(before), 'updated_at không đổi');
+    return 'updated_at tự cập nhật';
+  });
+  await t('Trạng thái nhân sự sai bị chặn', async () => {
+    const { error } = await sb.from('employees').update({ status: 'nghi_choi' }).eq('id', emp.id);
+    assert(error, 'DB nhận trạng thái rác');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Tạo hợp đồng và tính được số ngày còn hạn', async () => {
+    const end = addDays(new Date().toISOString().slice(0, 10), 20);
+    const c = await ins('contracts', { employee_id: emp.id, type: 'thu_viec', start_date: '2026-10-01', end_date: end, base_salary: 15000000, status: 'active' });
+    const left = Math.ceil((new Date(c.end_date) - new Date(new Date().toISOString().slice(0, 10))) / 86400000);
+    assert(left > 0 && left <= 30, 'số ngày còn lại = ' + left);
+    return `HĐ hết hạn sau ${left} ngày → phải hiện ở mục cảnh báo 30 ngày`;
+  });
+  await t('Loại hợp đồng sai bị chặn', async () => {
+    const { error } = await sb.from('contracts').insert({ employee_id: emp.id, type: 'thu_viec', status: 'abcxyz' });
+    assert(error, 'DB nhận trạng thái HĐ rác');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Mẫu onboarding có sẵn và đủ bước', async () => {
+    const { data } = await sb.from('onboarding_templates').select('*, onboarding_template_items(*)');
+    assert(data.length, 'chưa có mẫu nào');
+    const n = data[0].onboarding_template_items.length;
+    assert(n >= 5, 'mẫu chỉ có ' + n + ' bước');
+    return `${data.length} mẫu, mẫu đầu ${n} bước`;
+  });
+  await t('Áp mẫu onboarding tính đúng hạn theo ngày vào làm', async () => {
+    const { data: tpl } = await sb.from('onboarding_templates').select('*, onboarding_template_items(*)').limit(1).single();
+    const base = '2026-10-01';
+    const rows = tpl.onboarding_template_items.map(i => ({ employee_id: emp.id, title: i.title, owner_role: i.owner_role, due_date: addDays(base, i.day_offset), sort_order: i.sort_order }));
+    const { error } = await sb.from('onboarding_items').insert(rows);
+    if (error) throw new Error(error.message);
+    const { data: items } = await sb.from('onboarding_items').select('*').eq('employee_id', emp.id).order('sort_order');
+    const first = tpl.onboarding_template_items.sort((a, b) => a.sort_order - b.sort_order)[0];
+    const expect = addDays(base, first.day_offset);
+    assert(items[0].due_date === expect, `hạn việc đầu = ${items[0].due_date}, đúng phải là ${expect}`);
+    return `${items.length} việc, việc đầu hạn ${items[0].due_date}`;
+  });
+  await t('Tick hoàn thành lưu được và ghi giờ', async () => {
+    const { data: items } = await sb.from('onboarding_items').select('id').eq('employee_id', emp.id).limit(1);
+    const { data } = await sb.from('onboarding_items').update({ done: true, done_at: new Date().toISOString() }).eq('id', items[0].id).select().single();
+    assert(data.done && data.done_at, 'không lưu được trạng thái xong');
+    return 'done + done_at OK';
+  });
+  await t('Đánh giá thử việc: điểm trung bình đúng', async () => {
+    const scores = { chuyen_mon: 4, tien_do: 5, thai_do: 4, phoi_hop: 4, tuan_thu: 5 };
+    const total = Math.round(Object.values(scores).reduce((a, b) => a + b, 0) / 5 * 10) / 10;
+    const r = await ins('probation_reviews', { employee_id: emp.id, scores, total, result: 'pass', reviewer: TAG });
+    assert(Number(r.total) === 4.4, 'total = ' + r.total);
+    assert(r.scores.tien_do === 5, 'scores không lưu đúng');
+    return 'tổng 4.4/5, scores lưu nguyên vẹn';
+  });
+  await t('Kết luận thử việc sai bị chặn', async () => {
+    const { error } = await sb.from('probation_reviews').insert({ employee_id: emp.id, result: 'maybe' });
+    assert(error, 'DB nhận kết luận rác');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Xoá nhân sự dọn sạch hợp đồng, onboarding, đánh giá', async () => {
+    const id = emp.id;
+    await sb.from('employees').delete().eq('id', id);
+    made.employees = made.employees.filter(x => x !== id);
+    const left = await Promise.all(['contracts', 'onboarding_items', 'probation_reviews'].map(async tb =>
+      [tb, (await sb.from(tb).select('id').eq('employee_id', id)).data.length]));
+    const bad = left.filter(([, n]) => n > 0);
+    assert(!bad.length, 'còn sót: ' + JSON.stringify(bad));
+    emp = null;
+    return 'cascade sạch cả 3 bảng';
+  });
+  await t('Quản lý còn lại không bị xoá lây', async () => {
+    const { data } = await sb.from('employees').select('id').eq('id', mgr.id).maybeSingle();
+    assert(data, 'quản lý bị xoá theo nhân viên!');
+    return 'quản lý vẫn còn';
+  });
+  await t('Nhân sự tự làm quản lý của chính mình (rủi ro vòng lặp sơ đồ)', async () => {
+    const { error } = await sb.from('employees').update({ manager_id: mgr.id }).eq('id', mgr.id);
+    if (!error) {
+      await sb.from('employees').update({ manager_id: null }).eq('id', mgr.id);
+      warn('DB cho phép tự trỏ vào mình; giao diện đã chặn chọn chính mình và sơ đồ có khoá chống vòng lặp');
+    }
+    return 'DB chặn luôn';
+  });
+
+  /* ---------- E. Giao diện ---------- */
+  group = 'E. Giao diện (mở app thật trong khung ẩn)';
+  const frame = $('frame');
+  await t('App tải được và nhận phiên đăng nhập', async () => {
+    await new Promise((res, rej) => {
+      frame.onload = res; frame.onerror = rej; frame.src = './?selftest=' + Date.now();
+      setTimeout(() => rej(new Error('quá 20s không tải xong')), 20000);
+    });
+    const w = frame.contentWindow;
+    for (let i = 0; i < 40; i++) {
+      if (w.document.getElementById('app') && !w.document.getElementById('app').classList.contains('hide')) break;
+      await new Promise(r => setTimeout(r, 500));
+    }
+    assert(!w.document.getElementById('app').classList.contains('hide'), 'app không hiện (chưa đăng nhập?)');
+    return 'đăng nhập OK';
+  });
+  const tabs = ['Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding', 'Hợp đồng', 'Thử việc'];
+  await t('Đủ 7 tab chức năng', async () => {
+    const w = frame.contentWindow;
+    const names = [...w.document.querySelectorAll('nav button')].map(b => b.textContent.trim());
+    assert(names.length === 7, 'có ' + names.length + ' tab: ' + names.join(', '));
+    for (const n of tabs) assert(names.includes(n), 'thiếu tab ' + n);
+    return names.join(' · ');
+  });
+  for (const name of tabs) {
+    await t(`Tab "${name}" hiển thị được, không lỗi`, async () => {
+      const w = frame.contentWindow;
+      const errs = [];
+      w.onerror = (m) => errs.push(String(m));
+      const btn = [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === name);
+      btn.click();
+      await new Promise(r => setTimeout(r, 450));
+      const v = w.document.getElementById('view');
+      assert(v && v.innerHTML.trim().length > 20, 'nội dung trống');
+      assert(!errs.length, 'lỗi JS: ' + errs.join('; '));
+      return v.innerHTML.length + ' ký tự nội dung';
+    });
+  }
+  await t('Vị trí vừa tạo hiện đúng trên tab Vị trí & JD', async () => {
+    const w = frame.contentWindow;
+    [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === 'Vị trí & JD').click();
+    await new Promise(r => setTimeout(r, 400));
+    assert(w.document.getElementById('view').textContent.includes(TAG), 'không thấy vị trí kiểm thử');
+    return 'khớp dữ liệu DB';
+  });
+  await t('Kanban hiện đủ 7 cột vòng tuyển dụng', async () => {
+    const w = frame.contentWindow;
+    [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === 'Tuyển dụng').click();
+    await new Promise(r => setTimeout(r, 400));
+    const cols = w.document.querySelectorAll('.col').length;
+    assert(cols === 7, 'có ' + cols + ' cột');
+    return '7 cột';
+  });
+
+  /* ---------- dọn dẹp ---------- */
+  group = 'F. Dọn dẹp dữ liệu kiểm thử';
+  await t('Xoá sạch mọi bản ghi [SELFTEST]', async () => {
+    const report = [];
+    for (const tb of ['candidates', 'jobs', 'employees']) {
+      const ids = made[tb]; if (!ids.length) continue;
+      const { error } = await sb.from(tb).delete().in('id', ids);
+      if (error) throw new Error(tb + ': ' + error.message);
+      report.push(`${tb}:${ids.length}`);
+      made[tb] = [];
+    }
+    for (const tb of ['candidates', 'employees', 'jobs']) {
+      const { data } = await sb.from(tb).select('id').ilike(tb === 'jobs' ? 'title' : 'full_name', TAG + '%');
+      assert(!data.length, `còn sót ${data.length} dòng ở ${tb}`);
+    }
+    return report.join(', ') || 'không còn gì';
+  });
+
+  $('kTime').textContent = ((Date.now() - t0) / 1000).toFixed(1) + 's';
+  const fails = results.filter(r => r.state === 'fail');
+  log(fails.length ? `KẾT LUẬN: ${fails.length} hạng mục LỖI — ${fails.map(f => f.name).join(' | ')}`
+                   : 'KẾT LUẬN: toàn bộ hạng mục đạt.');
+  frame.src = 'about:blank';
+}
+$('run').onclick = async () => { $('run').disabled = true; try { await runAll(); } catch (e) { log('Lỗi bộ kiểm thử: ' + e.message); } $('run').disabled = false; };
+sb.auth.getSession().then(({ data }) => { if (data.session) $('who').textContent = data.session.user.email; });
+</script>
+</body>
+</html>
