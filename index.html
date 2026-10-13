@@ -1378,6 +1378,9 @@ function wireXlsx() {
   document.querySelectorAll('[data-xl-exp]').forEach(b => b.onclick = () => exportSheet(b.dataset.xlExp).catch(e => toast(e.message, 6000)));
 }
 window.__hdrc = { SHEETS, parseAoa, xlDate, xlNum, cellOut, xlText, today, dayDiff, addDays };
+// bộ test chạy app trong iframe ẩn và cần nạp lại dữ liệu sau khi nó tạo bản ghi mới
+window.__hdrcReload = async () => { await loadAll(); render(); };
+window.__hdrcState = () => state;
 
 
 /* =================== 9. OFFER LETTER & EMAIL =================== */

@@ -41,7 +41,7 @@ iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
     <div><b id="kFail">–</b><span class="sub">Lỗi</span></div>
     <div><b id="kWarn">–</b><span class="sub">Cảnh báo</span></div>
     <div><b id="kTime">–</b><span class="sub">Thời gian</span></div>
-    <div><b id="kBuild">20261014-0240</b><span class="sub">Phiên bản bộ test</span></div>
+    <div><b id="kBuild">20261014-0315</b><span class="sub">Phiên bản bộ test</span></div>
   </div>
   <table id="out"><thead><tr><th style="width:60px">KQ</th><th>Hạng mục</th><th>Chi tiết</th></tr></thead><tbody></tbody></table>
   <div id="log"></div>
@@ -514,10 +514,17 @@ async function runAll() {
     assert(xlText({ k: 'phone' }, '0281234567', '0281234567') === '0281234567', 'số bàn bị đổi');
     return '901234567 → 0901234567, +84… → 0…, số bàn giữ nguyên';
   });
+  await t('App cho bộ test nạp lại dữ liệu được', async () => {
+    assert(typeof W().__hdrcReload === 'function', 'app thiếu __hdrcReload — các kiểm thử sau sẽ đọc dữ liệu cũ');
+    await W().__hdrcReload();
+    return 'có __hdrcReload';
+  });
   await t('Hai nhân sự trùng tên: báo lỗi thay vì chọn bừa dòng đầu', async () => {
     const code = TAG.replace(/\W/g, '') + '-TWIN';
     const twin = await ins('employees', { full_name: mgr.full_name, employee_code: code, title: 'Manager', department: 'QA2', status: 'active' });
-    await W().__hdrcReload?.();
+    await W().__hdrcReload();
+    const seen = W().__hdrcState ? W().__hdrcState().employees.filter(x => x.full_name === mgr.full_name).length : 2;
+    assert(seen >= 2, `app mới thấy ${seen} người tên "${mgr.full_name}" — chưa nạp lại được dữ liệu`);
     const bad = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Quản lý trực tiếp (họ tên)'], ['Nhan vien moi 2', mgr.full_name]]);
     assert(bad.errors.length, 'vẫn chọn bừa một người!');
     const good = W().__hdrc.parseAoa('employees', [['Họ tên *', 'Quản lý trực tiếp (họ tên)'], ['Nhan vien moi 2', `${mgr.full_name} (${code})`]]);
