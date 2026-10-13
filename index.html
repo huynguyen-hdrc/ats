@@ -167,7 +167,8 @@ function daysAgo(ts) {
 }
 const state = { view: 'pipeline', q: '', job: '', showClosed: false, drag: null,
   stages: [], jobs: [], candidates: [], employees: [], contracts: [], obItems: [], obTemplates: [], reviews: [],
-  templates: [], offers: [], emails: [], me: '', resend: null };
+  templates: [], offers: [], emails: [], me: '', resend: null,
+  role: 'staff', myEmp: null, profiles: [], leaveTypes: [], leaves: [], balances: [], notifs: [] };
 
 /* ---------- generic form engine ---------- */
 function fieldsHTML(spec, v = {}, p = 'f') {
@@ -242,33 +243,53 @@ async function loadAll() {
     sb.from('probation_reviews').select('*').order('review_date', { ascending: false }),
     sb.from('email_templates').select('*').order('name'),
     sb.from('offers').select('*').order('created_at', { ascending: false }),
-    sb.from('email_log').select('*').order('created_at', { ascending: false }).limit(300)
+    sb.from('email_log').select('*').order('created_at', { ascending: false }).limit(300),
+    sb.from('profiles').select('*').order('email'),
+    sb.from('leave_types').select('*').order('sort_order'),
+    sb.from('leave_requests').select('*').order('start_date', { ascending: false }).limit(500),
+    sb.from('leave_balances').select('*'),
+    sb.from('notifications').select('*').eq('status', 'open').order('due_date')
   ]);
   const bad = r.find(x => x.error);
   if (bad) { toast('Lỗi tải dữ liệu: ' + bad.error.message, 6000); return false; }
   [state.stages, state.jobs, state.candidates, state.employees, state.contracts, state.obItems, state.obTemplates,
-   state.reviews, state.templates, state.offers, state.emails] = r.map(x => x.data);
+   state.reviews, state.templates, state.offers, state.emails,
+   state.profiles, state.leaveTypes, state.leaves, state.balances, state.notifs] = r.map(x => x.data || []);
+  const me = state.profiles.find(p => p.email === state.me);
+  if (me) { state.role = me.role; state.myEmp = me.employee_id; }
   return true;
 }
 const empName = (id) => state.employees.find(e => e.id === id)?.full_name || '';
 const jobName = (id) => state.jobs.find(j => j.id === id)?.title || '';
 
 /* ---------- router ---------- */
+const HR = ['admin', 'hr'], MGR = ['admin', 'hr', 'manager'], ALL = ['admin', 'hr', 'manager', 'staff'];
 const VIEWS = [
-  ['pipeline', 'Tuyển dụng'],
-  ['jobs', 'Vị trí & JD'],
-  ['people', 'Danh bạ nhân sự'],
-  ['org', 'Sơ đồ tổ chức'],
-  ['onboarding', 'Onboarding'],
-  ['contracts', 'Hợp đồng'],
-  ['probation', 'Thử việc'],
-  ['mail', 'Thư & Email']
+  ['dash', 'Bảng điều hành', ALL],
+  ['pipeline', 'Tuyển dụng', MGR],
+  ['jobs', 'Vị trí & JD', ALL],
+  ['people', 'Danh bạ nhân sự', ALL],
+  ['org', 'Sơ đồ tổ chức', ALL],
+  ['onboarding', 'Onboarding', ALL],
+  ['leave', 'Nghỉ phép', ALL],
+  ['contracts', 'Hợp đồng', HR],
+  ['probation', 'Thử việc', MGR],
+  ['mail', 'Thư & Email', MGR],
+  ['settings', 'Phân quyền', HR]
 ];
+const can = (roles) => roles.includes(state.role);
+const isHR = () => HR.includes(state.role);
 function render() {
-  $('nav').innerHTML = VIEWS.map(([k, l]) => `<button data-v="${k}" class="${state.view === k ? 'on' : ''}">${l}</button>`).join('');
+  const allowed = VIEWS.filter(([, , roles]) => can(roles));
+  if (!allowed.some(([k]) => k === state.view)) state.view = allowed[0][0];
+  $('nav').innerHTML = allowed.map(([k, l]) => {
+    const badge = k === 'dash' && state.notifs.length ? ` <span class="tag warn">${state.notifs.length}</span>` : '';
+    return `<button data-v="${k}" class="${state.view === k ? 'on' : ''}">${l}${badge}</button>`;
+  }).join('');
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.v; state.q = ''; render(); });
   ({ pipeline: viewPipeline, jobs: viewJobs, people: viewPeople, org: viewOrg,
-     onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation, mail: viewMail })[state.view]();
+     onboarding: viewOnboarding, contracts: viewContracts, probation: viewProbation, mail: viewMail,
+     dash: viewDash, leave: viewLeave, settings: viewSettings })[state.view]();
   wireXlsx();
 }
 function searchBox(ph) {
@@ -579,7 +600,9 @@ function openEmployee(id) {
   const revs = state.reviews.filter(r => r.employee_id === id);
   const doneN = items.filter(i => i.done).length;
   openDrawer(e.full_name, `<div class="row2">${fieldsHTML(spec, e)}</div>
-    <div class="actions"><button class="btn danger" id="eDel">Xoá</button><button class="btn primary" id="eSave">Lưu</button></div>
+    <div class="actions"><button class="btn danger" id="eDel">Xoá</button>
+      ${isHR() ? '<button class="btn" id="eDocs">Hồ sơ & giấy tờ</button>' : ''}
+      <button class="btn primary" id="eSave">Lưu</button></div>
     <h4 style="margin:18px 0 8px">Hợp đồng (${cons.length})</h4>
     ${cons.map(c => `<div class="meta">• ${esc(CONTRACT_TYPES[c.type] || c.type)} — ${d(c.start_date)} → ${c.end_date ? d(c.end_date) : 'không thời hạn'}${c.base_salary ? ' — ' + money(c.base_salary) + 'đ' : ''}</div>`).join('') || '<div class="empty">Chưa có hợp đồng</div>'}
     <h4 style="margin:18px 0 8px">Onboarding</h4>
@@ -588,6 +611,7 @@ function openEmployee(id) {
     ${revs.map(r => `<div class="meta">• ${d(r.review_date)} — ${r.total ?? '-'}/5 — ${RESULT_LABEL[r.result] || 'chưa kết luận'}</div>`).join('') || '<div class="empty">Chưa có đánh giá</div>'}`);
   $('eSave').onclick = async () => { if (await upsert('employees', readFields(spec), id)) { openEmployee(id); toast('Đã lưu'); } };
   $('eDel').onclick = () => removeRow('employees', id, 'nhân sự ' + e.full_name);
+  if ($('eDocs')) $('eDocs').onclick = () => openEmployeeDocs(id);
 }
 
 /* =================== 4. SƠ ĐỒ TỔ CHỨC =================== */
@@ -899,6 +923,20 @@ const SHEETS = {
       { h: 'Phụ trách', k: 'owner_role' },
       { h: 'Hạn', k: 'due_date', date: true },
       { h: 'Đã xong (Có/Không)', k: 'done', bool: true }
+    ]
+  },
+  leave: {
+    label: 'Đơn nghỉ phép', file: 'don-nghi-phep', importable: false,
+    rows: () => state.leaves,
+    cols: [
+      { h: 'Nhân sự', k: 'employee_id', lookup: 'employee' },
+      { h: 'Loại nghỉ', k: 'type_key' },
+      { h: 'Từ ngày', k: 'start_date', date: true },
+      { h: 'Đến ngày', k: 'end_date', date: true },
+      { h: 'Số ngày', k: 'days', num: true },
+      { h: 'Trạng thái', k: 'status', map: { 'Chờ duyệt': 'pending', 'Đã duyệt': 'approved', 'Từ chối': 'rejected', 'Đã huỷ': 'cancelled' } },
+      { h: 'Lý do', k: 'reason' },
+      { h: 'Người duyệt', k: 'approver_name' }
     ]
   },
   probation: {
@@ -1379,6 +1417,297 @@ function templateList() {
   });
 }
 window.__hdrcMail = { renderTpl, offerVars, TPL_VARS };
+window.__hdrcHR = { workDays, can, isHR, VIEWS, ROLE_LABEL };
+
+
+/* =================== 10. BẢNG ĐIỀU HÀNH & NHẮC VIỆC =================== */
+const NOTIF_LABEL = { contract_expiring: 'Hợp đồng', probation_due: 'Thử việc', onboarding_overdue: 'Onboarding', offer_expiring: 'Offer', leave_pending: 'Nghỉ phép' };
+function bars(title, rows) {
+  const max = Math.max(1, ...rows.map(r => r[1]));
+  return `<div class="panel"><h4>${esc(title)}</h4>
+    ${rows.length ? rows.map(([k, v]) => `<div style="margin:8px 0">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span>${esc(k)}</span><b>${v}</b></div>
+      <div class="bar"><i style="width:${Math.round(v / max * 100)}%"></i></div></div>`).join('')
+    : '<div class="empty">Chưa có dữ liệu</div>'}</div>`;
+}
+function viewDash() {
+  $('toolbar').innerHTML = `<span class="meta">Số liệu cập nhật theo thời gian thực từ dữ liệu đang dùng.</span>
+    <span class="spacer"></span><button class="btn" id="dashRefresh">Quét nhắc việc ngay</button>`;
+  $('dashRefresh').onclick = async () => {
+    const { error } = await sb.rpc('refresh_notifications');
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    await loadAll(); render(); toast('Đã quét lại việc cần nhắc');
+  };
+  const emps = state.employees.filter(e => e.status !== 'left');
+  const probation = emps.filter(e => e.status === 'probation');
+  const openJobs = state.jobs.filter(j => j.is_open);
+  const activeCands = state.candidates.filter(c => c.status === 'active');
+  const hired = state.candidates.filter(c => c.stage === 'hired');
+  const conSoon = state.contracts.filter(c => c.status === 'active' && c.end_date && dayDiff(c.end_date) >= 0 && dayDiff(c.end_date) <= 30);
+  const pendingLeave = state.leaves.filter(l => l.status === 'pending');
+  const offersSent = state.offers.filter(o => o.status === 'sent');
+  const accepted = state.offers.filter(o => o.status === 'accepted').length;
+  const decided = state.offers.filter(o => ['accepted', 'declined'].includes(o.status)).length;
+  const ttl = hired.map(c => Math.round((new Date(c.stage_changed_at) - new Date(c.created_at)) / 86400000)).filter(n => n >= 0);
+  const avgTtl = ttl.length ? Math.round(ttl.reduce((a, b) => a + b, 0) / ttl.length) : null;
+  const byDept = Object.entries(emps.reduce((m, e) => { const k = e.department || 'Chưa gán'; m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
+  const byStage = state.stages.map(st => [st.label, activeCands.filter(c => c.stage === st.key).length]);
+  const bySource = Object.entries(activeCands.reduce((m, c) => { const k = c.source || 'Chưa rõ'; m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const tile = (n, l, warn) => `<div class="sum" style="background:#fff;border:1px solid var(--line);flex-direction:column;align-items:flex-start;gap:2px">
+    <b style="font-size:22px;color:${warn && n ? 'var(--danger)' : 'var(--text)'}">${n}</b><span style="color:var(--muted);font-weight:600">${l}</span></div>`;
+  $('view').innerHTML = `
+    ${state.notifs.length ? `<div class="panel" style="border-color:#e8d3ae;background:#fffaf0;margin-bottom:14px">
+      <h4>Việc cần xử lý (${state.notifs.length})</h4>
+      ${state.notifs.slice(0, 20).map(n => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #f0e6d2">
+        <span class="tag">${esc(NOTIF_LABEL[n.kind] || n.kind)}</span>
+        <div style="flex:1"><b>${esc(n.title)}</b><div class="meta">${esc(n.body || '')}</div></div>
+        ${n.due_date ? `<span class="tag ${dayDiff(n.due_date) < 0 ? 'warn' : 'soon'}">${d(n.due_date)}</span>` : ''}
+        ${isHR() ? `<button class="btn sm" data-notif="${n.id}">Đã xử lý</button>` : ''}</div>`).join('')}
+    </div>` : '<div class="panel" style="margin-bottom:14px"><b>Không có việc nào quá hạn.</b> <span class="meta">Hệ thống tự quét mỗi sáng 8h.</span></div>'}
+    <div class="summary" style="flex-wrap:wrap">
+      ${tile(emps.length, 'Nhân sự đang làm')}
+      ${tile(probation.length, 'Đang thử việc')}
+      ${tile(openJobs.length, 'Vị trí đang tuyển')}
+      ${tile(activeCands.length, 'Ứng viên đang xử lý')}
+      ${tile(offersSent.length, 'Offer chờ phản hồi')}
+      ${tile(conSoon.length, 'HĐ hết hạn ≤30 ngày', true)}
+      ${tile(pendingLeave.length, 'Đơn nghỉ chờ duyệt', true)}
+      ${tile(avgTtl == null ? '–' : avgTtl + ' ngày', 'Thời gian tuyển TB')}
+    </div>
+    <div class="cards" style="margin-top:14px">
+      ${bars('Nhân sự theo phòng ban', byDept)}
+      ${bars('Ứng viên theo vòng', byStage)}
+      ${bars('Nguồn ứng viên', bySource)}
+      ${bars('Tỉ lệ nhận offer', [['Đồng ý', accepted], ['Từ chối', decided - accepted], ['Chờ phản hồi', offersSent.length]])}
+    </div>`;
+  document.querySelectorAll('[data-notif]').forEach(b => b.onclick = async () => {
+    await sb.from('notifications').update({ status: 'done' }).eq('id', b.dataset.notif);
+    await loadAll(); render();
+  });
+}
+
+/* =================== 11. NGHỈ PHÉP =================== */
+const LEAVE_STATUS = { pending: 'Chờ duyệt', approved: 'Đã duyệt', rejected: 'Từ chối', cancelled: 'Đã huỷ' };
+function workDays(a, b) {
+  let n = 0; const x = new Date(a), y = new Date(b);
+  for (let dte = new Date(x); dte <= y; dte.setDate(dte.getDate() + 1)) {
+    const w = dte.getDay(); if (w !== 0 && w !== 6) n++;
+  }
+  return n;
+}
+const leaveName = (l) => empName(l.employee_id) || '(chưa gán nhân sự)';
+function myTeamIds() {
+  return state.employees.filter(e => e.manager_id === state.myEmp).map(e => e.id);
+}
+function viewLeave() {
+  const team = myTeamIds();
+  const mine = state.leaves.filter(l => l.employee_id === state.myEmp);
+  const toApprove = state.leaves.filter(l => l.status === 'pending' && (isHR() || team.includes(l.employee_id)));
+  const all = isHR() ? state.leaves : state.leaves.filter(l => l.employee_id === state.myEmp || team.includes(l.employee_id));
+  const rows = all.filter(l => hit({ ...l, nm: leaveName(l) }, ['nm', 'reason']));
+  const year = new Date().getFullYear();
+  const bal = (typeKey) => {
+    const b = state.balances.find(x => x.employee_id === state.myEmp && x.year === year && x.type_key === typeKey);
+    const t = state.leaveTypes.find(x => x.key === typeKey);
+    const total = b ? Number(b.days_total) : Number(t?.default_days || 0);
+    const used = state.leaves.filter(l => l.employee_id === state.myEmp && l.type_key === typeKey && l.status === 'approved'
+      && new Date(l.start_date).getFullYear() === year).reduce((a, l) => a + Number(l.days), 0);
+    return { total, used, left: total - used };
+  };
+  $('toolbar').innerHTML = `${searchBox('Tìm theo tên, lý do...')}<span class="spacer"></span>
+    ${isHR() ? '<button class="btn" id="lvBal">Hạn mức phép</button>' : ''}
+    <button class="btn primary" id="lvNew">+ Đơn nghỉ</button>${xlsxBar('leave')}`;
+  wireSearch(); wireXlsx();
+  $('lvNew').onclick = () => leaveForm();
+  if ($('lvBal')) $('lvBal').onclick = balanceEditor;
+  const a = bal('annual');
+  $('view').innerHTML = `
+    ${state.myEmp ? `<div class="summary">
+      <div class="sum" style="background:#fff;border:1px solid var(--line);flex-direction:column;align-items:flex-start">
+        <b style="font-size:20px">${a.left}</b><span style="color:var(--muted);font-weight:600">Phép năm còn lại (${year})</span></div>
+      <div class="sum" style="background:#fff;border:1px solid var(--line);flex-direction:column;align-items:flex-start">
+        <b style="font-size:20px">${a.used}</b><span style="color:var(--muted);font-weight:600">Đã dùng</span></div>
+      <div class="sum" style="background:#fff;border:1px solid var(--line);flex-direction:column;align-items:flex-start">
+        <b style="font-size:20px">${mine.filter(l => l.status === 'pending').length}</b><span style="color:var(--muted);font-weight:600">Đơn của tôi chờ duyệt</span></div>
+    </div>`
+    : `<div class="panel" style="margin-bottom:12px;border-color:#e8d3ae;background:#fffaf0">Tài khoản của bạn chưa gắn với hồ sơ nhân sự nào — HR vào tab <b>Phân quyền</b> để gắn, khi đó mới tạo được đơn nghỉ cho chính mình.</div>`}
+    ${toApprove.length ? `<h2 class="sec" style="margin-top:16px">Chờ bạn duyệt (${toApprove.length})</h2>
+      <table class="grid"><thead><tr><th>Nhân sự</th><th>Loại</th><th>Từ</th><th>Đến</th><th>Số ngày</th><th>Lý do</th><th></th></tr></thead>
+      <tbody>${toApprove.map(l => `<tr>
+        <td><b>${esc(leaveName(l))}</b></td>
+        <td>${esc(state.leaveTypes.find(t => t.key === l.type_key)?.label || l.type_key)}</td>
+        <td>${d(l.start_date)}</td><td>${d(l.end_date)}</td><td>${l.days}</td><td>${esc(l.reason)}</td>
+        <td style="white-space:nowrap"><button class="btn sm" data-ok="${l.id}">Duyệt</button>
+          <button class="btn sm danger" data-no="${l.id}">Từ chối</button></td></tr>`).join('')}</tbody></table>` : ''}
+    <h2 class="sec" style="margin-top:18px">Đơn nghỉ (${rows.length})</h2>
+    ${rows.length ? `<table class="grid"><thead><tr><th>Nhân sự</th><th>Loại</th><th>Từ</th><th>Đến</th><th>Ngày</th><th>Trạng thái</th><th>Người duyệt</th></tr></thead>
+      <tbody>${rows.map(l => `<tr data-leave="${l.id}">
+        <td><b>${esc(leaveName(l))}</b></td>
+        <td>${esc(state.leaveTypes.find(t => t.key === l.type_key)?.label || l.type_key)}</td>
+        <td>${d(l.start_date)}</td><td>${d(l.end_date)}</td><td>${l.days}</td>
+        <td><span class="tag ${l.status === 'approved' ? 'ok' : l.status === 'rejected' ? 'warn' : 'soon'}">${LEAVE_STATUS[l.status]}</span></td>
+        <td>${esc(l.approver_name)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Chưa có đơn nghỉ nào.</div>'}`;
+  document.querySelectorAll('[data-ok]').forEach(b => b.onclick = (e) => { e.stopPropagation(); decideLeave(b.dataset.ok, 'approved'); });
+  document.querySelectorAll('[data-no]').forEach(b => b.onclick = (e) => { e.stopPropagation(); decideLeave(b.dataset.no, 'rejected'); });
+  document.querySelectorAll('[data-leave]').forEach(tr => tr.onclick = () => {
+    const l = state.leaves.find(x => x.id === tr.dataset.leave);
+    if (isHR() || l.employee_id === state.myEmp) leaveForm(l.id);
+  });
+}
+async function decideLeave(id, status) {
+  const note = status === 'rejected' ? prompt('Lý do từ chối (không bắt buộc):') : null;
+  const { error } = await sb.from('leave_requests').update({
+    status, decided_at: new Date().toISOString(), approver_name: state.me, decision_note: note
+  }).eq('id', id);
+  if (error) return toast('Lỗi: ' + error.message, 6000);
+  await loadAll(); render(); toast(status === 'approved' ? 'Đã duyệt đơn' : 'Đã từ chối đơn');
+}
+function leaveForm(id) {
+  const l = id ? state.leaves.find(x => x.id === id) : null;
+  const canPickEmp = isHR();
+  const spec = [
+    ...(canPickEmp ? [{ k: 'employee_id', label: 'Nhân sự *', type: 'select', opts: [['', '— chọn —'], ...state.employees.filter(e => e.status !== 'left').map(e => [e.id, e.full_name])] }] : []),
+    { k: 'type_key', label: 'Loại nghỉ', type: 'select', opts: state.leaveTypes.map(t => [t.key, t.label]) },
+    { k: 'start_date', label: 'Từ ngày *', type: 'date' },
+    { k: 'end_date', label: 'Đến ngày *', type: 'date' },
+    { k: 'days', label: 'Số ngày (tự tính, sửa được)', type: 'number', step: '0.5' },
+    { k: 'reason', label: 'Lý do', type: 'textarea', wide: true, rows: 3 },
+    ...(isHR() && id ? [{ k: 'status', label: 'Trạng thái', type: 'select', opts: Object.entries(LEAVE_STATUS) }] : [])
+  ];
+  const values = l || { employee_id: state.myEmp || '', type_key: 'annual', start_date: today(), end_date: today(), days: 1, status: 'pending' };
+  formModal(id ? 'Sửa đơn nghỉ' : 'Tạo đơn nghỉ', spec, values, async (o) => {
+    const payload = { ...o, employee_id: canPickEmp ? o.employee_id : state.myEmp };
+    if (!payload.employee_id) return toast('Chưa gắn hồ sơ nhân sự cho tài khoản này');
+    if (!payload.start_date || !payload.end_date) return toast('Chọn ngày bắt đầu và kết thúc');
+    if (new Date(payload.end_date) < new Date(payload.start_date)) return toast('Ngày kết thúc phải sau ngày bắt đầu');
+    if (!payload.days) payload.days = workDays(payload.start_date, payload.end_date);
+    if (await upsert('leave_requests', payload, id)) { closeAll(); toast(id ? 'Đã cập nhật đơn' : 'Đã gửi đơn nghỉ, chờ duyệt'); }
+  });
+  const sd = $('f_start_date'), ed = $('f_end_date'), dd = $('f_days');
+  const recalc = () => { if (sd.value && ed.value && new Date(ed.value) >= new Date(sd.value)) dd.value = workDays(sd.value, ed.value); };
+  sd.onchange = recalc; ed.onchange = recalc;
+}
+function balanceEditor() {
+  const year = new Date().getFullYear();
+  openModal('Hạn mức phép năm ' + year, `
+    <table class="grid"><thead><tr><th>Nhân sự</th><th>Phép năm (ngày)</th></tr></thead><tbody>
+    ${state.employees.filter(e => e.status !== 'left').map(e => {
+      const b = state.balances.find(x => x.employee_id === e.id && x.year === year && x.type_key === 'annual');
+      return `<tr><td>${esc(e.full_name)}</td><td><input type="number" step="0.5" style="width:90px" data-bal="${e.id}" value="${b ? b.days_total : 12}"></td></tr>`;
+    }).join('')}</tbody></table>
+    <div class="actions"><button class="btn" id="blCancel">Đóng</button><button class="btn primary" id="blSave">Lưu</button></div>`);
+  $('blCancel').onclick = closeAll;
+  $('blSave').onclick = async () => {
+    const rows = [...document.querySelectorAll('[data-bal]')].map(i => ({
+      employee_id: i.dataset.bal, year, type_key: 'annual', days_total: Number(i.value || 0)
+    }));
+    const { error } = await sb.from('leave_balances').upsert(rows);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    closeAll(); await loadAll(); render(); toast('Đã lưu hạn mức phép');
+  };
+}
+
+/* =================== 12. PHÂN QUYỀN =================== */
+const ROLE_LABEL = { admin: 'Quản trị (toàn quyền)', hr: 'Nhân sự (HR)', manager: 'Quản lý', staff: 'Nhân viên' };
+function viewSettings() {
+  $('toolbar').innerHTML = `<span class="meta">Ai được xem gì: HR/Quản trị thấy toàn bộ · Quản lý thấy tuyển dụng, đội của mình · Nhân viên chỉ thấy danh bạ, onboarding và nghỉ phép của mình.</span>`;
+  $('view').innerHTML = `
+    <table class="grid"><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Gắn với hồ sơ nhân sự</th></tr></thead>
+    <tbody>${state.profiles.map(p => `<tr>
+      <td><b>${esc(p.email)}</b>${p.email === state.me ? ' <span class="tag">bạn</span>' : ''}</td>
+      <td><select data-role="${p.id}">${Object.entries(ROLE_LABEL).map(([k, v]) => `<option value="${k}" ${p.role === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
+      <td><select data-emp="${p.id}"><option value="">— chưa gắn —</option>
+        ${state.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.full_name)}</option>`).join('')}</select></td>
+    </tr>`).join('')}</tbody></table>
+    <div class="panel" style="margin-top:14px"><h4>Lưu ý</h4>
+      <div class="meta">• Người mới đăng nhập lần đầu mặc định là <b>Nhân viên</b>, HR vào đây nâng quyền.</div>
+      <div class="meta">• Phải gắn tài khoản với hồ sơ nhân sự thì người đó mới tạo được đơn nghỉ và thấy hợp đồng của chính mình.</div>
+      <div class="meta">• Lương và hợp đồng chỉ HR/Quản trị xem được; file hồ sơ (CCCD, HĐ scan) cũng vậy.</div></div>`;
+  document.querySelectorAll('[data-role]').forEach(sel => sel.onchange = async () => {
+    const { error } = await sb.from('profiles').update({ role: sel.value }).eq('id', sel.dataset.role);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    await loadAll(); render(); toast('Đã đổi vai trò');
+  });
+  document.querySelectorAll('[data-emp]').forEach(sel => sel.onchange = async () => {
+    const { error } = await sb.from('profiles').update({ employee_id: sel.value || null }).eq('id', sel.dataset.emp);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    await loadAll(); render(); toast('Đã gắn hồ sơ nhân sự');
+  });
+}
+
+/* =================== 13. HỒ SƠ & GIẤY TỜ NHÂN SỰ (HR) =================== */
+const PRIVATE_SPEC = [
+  { k: 'dob', label: 'Ngày sinh', type: 'date' },
+  { k: 'gender', label: 'Giới tính', type: 'select', opts: [['', '—'], ['Nam', 'Nam'], ['Nữ', 'Nữ'], ['Khác', 'Khác']] },
+  { k: 'id_number', label: 'Số CCCD/CMND' },
+  { k: 'id_issued_on', label: 'Ngày cấp', type: 'date' },
+  { k: 'id_issued_by', label: 'Nơi cấp' },
+  { k: 'tax_code', label: 'Mã số thuế cá nhân' },
+  { k: 'social_insurance_no', label: 'Số sổ BHXH' },
+  { k: 'dependents', label: 'Số người phụ thuộc', type: 'number' },
+  { k: 'bank_name', label: 'Ngân hàng' },
+  { k: 'bank_account', label: 'Số tài khoản' },
+  { k: 'permanent_address', label: 'Hộ khẩu thường trú', wide: true },
+  { k: 'current_address', label: 'Chỗ ở hiện tại', wide: true },
+  { k: 'emergency_contact', label: 'Liên hệ khẩn cấp', wide: true }
+];
+const DOC_TYPES = [['cccd', 'CCCD/CMND'], ['hop_dong', 'Hợp đồng đã ký'], ['bang_cap', 'Bằng cấp / chứng chỉ'],
+  ['so_yeu', 'Sơ yếu lý lịch'], ['kham_suc_khoe', 'Giấy khám sức khoẻ'], ['bhxh', 'Giấy tờ BHXH'], ['khac', 'Khác']];
+async function openEmployeeDocs(empId) {
+  const e = state.employees.find(x => x.id === empId); if (!e) return;
+  const [{ data: priv }, { data: docs }] = await Promise.all([
+    sb.from('employee_private').select('*').eq('employee_id', empId).maybeSingle(),
+    sb.from('employee_documents').select('*').eq('employee_id', empId).order('uploaded_at', { ascending: false })
+  ]);
+  openDrawer('Hồ sơ & giấy tờ — ' + e.full_name, `
+    <div class="row2">${fieldsHTML(PRIVATE_SPEC, priv || {}, 'pv')}</div>
+    <div class="actions"><button class="btn primary" id="pvSave">Lưu hồ sơ</button></div>
+    <h4 style="margin:18px 0 8px">Giấy tờ đính kèm (${(docs || []).length})</h4>
+    <div class="row2">
+      <div class="field"><label>Loại giấy tờ</label><select id="docType">${DOC_TYPES.map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <div class="field"><label>Hạn hiệu lực (nếu có)</label><input type="date" id="docExp"></div>
+    </div>
+    <div class="actions"><button class="btn" id="docPick">Chọn file & tải lên</button></div>
+    ${(docs || []).map(x => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+      <span class="tag">${esc(DOC_TYPES.find(t => t[0] === x.doc_type)?.[1] || x.doc_type)}</span>
+      <div style="flex:1"><b>${esc(x.file_name)}</b><div class="meta">${new Date(x.uploaded_at).toLocaleDateString('vi-VN')}${x.expires_on ? ' · hạn ' + d(x.expires_on) : ''}</div></div>
+      <button class="btn sm" data-doc="${x.file_path}">Mở</button>
+      <button class="btn sm danger" data-docdel="${x.id}">Xoá</button></div>`).join('') || '<div class="empty">Chưa có giấy tờ nào</div>'}`);
+  $('pvSave').onclick = async () => {
+    const payload = { ...readFields(PRIVATE_SPEC, 'pv'), employee_id: empId };
+    const { error } = await sb.from('employee_private').upsert(payload);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    toast('Đã lưu hồ sơ cá nhân');
+  };
+  $('docPick').onclick = () => {
+    const inp = document.createElement('input'); inp.type = 'file';
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      if (f.size > 15 * 1024 * 1024) return toast('File quá 15MB', 5000);
+      const path = `${empId}/${Date.now()}-${f.name.replace(/[^\w.\-]+/g, '_')}`;
+      const up = await sb.storage.from('hr-docs').upload(path, f);
+      if (up.error) return toast('Upload lỗi: ' + up.error.message, 6000);
+      const { error } = await sb.from('employee_documents').insert({
+        employee_id: empId, doc_type: $('docType').value, file_path: path, file_name: f.name,
+        expires_on: $('docExp').value || null
+      });
+      if (error) return toast('Lỗi: ' + error.message, 6000);
+      openEmployeeDocs(empId); toast('Đã tải lên ' + f.name);
+    };
+    inp.click();
+  };
+  document.querySelectorAll('[data-doc]').forEach(b => b.onclick = async () => {
+    const { data, error } = await sb.storage.from('hr-docs').createSignedUrl(b.dataset.doc, 300);
+    if (error) return toast('Lỗi: ' + error.message, 6000);
+    window.open(data.signedUrl, '_blank');
+  });
+  document.querySelectorAll('[data-docdel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Xoá giấy tờ này?')) return;
+    await sb.from('employee_documents').delete().eq('id', b.dataset.docdel);
+    openEmployeeDocs(empId); toast('Đã xoá');
+  });
+}
 
 /* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (_e, session) => { await boot(session); });

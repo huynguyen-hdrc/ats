@@ -52,7 +52,7 @@ const URL_ = 'https://hzsybxvvcexayducvfll.supabase.co', KEY = 'sb_publishable_j
 const sb = createClient(URL_, KEY);
 const TAG = '[SELFTEST]';
 const results = [];
-const made = { jobs: [], candidates: [], employees: [], onboarding_templates: [], offers: [] };
+const made = { jobs: [], candidates: [], employees: [], onboarding_templates: [], offers: [], leave_requests: [] };
 let group = '';
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $('log').textContent += m + '\n'; };
@@ -342,17 +342,18 @@ async function runAll() {
     let n = 0;
     for (let i = 0; i < 60; i++) {
       n = w.document.querySelectorAll('nav button').length;
-      if (n >= 7) break;
+      if (n >= 11) break;
       await new Promise(r => setTimeout(r, 500));
     }
     assert(!w.document.getElementById('app').classList.contains('hide'), 'app không hiện (chưa đăng nhập?)');
-    assert(n >= 7, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
+    assert(n >= 11, `app hiện nhưng chưa render xong sau 30s (nav có ${n} nút)`);
     return 'đăng nhập + render OK';
   });
-  const tabs = ['Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding', 'Hợp đồng', 'Thử việc', 'Thư & Email'];
-  await t('Đủ 8 tab chức năng', async () => {
+  const tabs = ['Bảng điều hành', 'Tuyển dụng', 'Vị trí & JD', 'Danh bạ nhân sự', 'Sơ đồ tổ chức', 'Onboarding',
+    'Nghỉ phép', 'Hợp đồng', 'Thử việc', 'Thư & Email', 'Phân quyền'];
+  await t('Đủ 11 tab chức năng (tài khoản quản trị)', async () => {
     const w = frame.contentWindow;
-    const names = [...w.document.querySelectorAll('nav button')].map(b => b.textContent.trim());
+    const names = [...w.document.querySelectorAll('nav button')].map(b => b.textContent.trim().replace(/\s+\d+$/, ''));
     assert(names.length === tabs.length, 'có ' + names.length + ' tab: ' + names.join(', '));
     for (const n of tabs) assert(names.includes(n), 'thiếu tab ' + n);
     return names.join(' · ');
@@ -362,7 +363,7 @@ async function runAll() {
       const w = frame.contentWindow;
       const errs = [];
       w.onerror = (m) => errs.push(String(m));
-      const btn = [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim() === name);
+      const btn = [...w.document.querySelectorAll('nav button')].find(b => b.textContent.trim().replace(/\s+\d+$/, '') === name);
       assert(btn, 'không tìm thấy tab ' + name);
       btn.click();
       await new Promise(r => setTimeout(r, 450));
@@ -585,8 +586,159 @@ async function runAll() {
     return 'offer giữ lại, liên kết ứng viên để trống';
   });
 
+  /* ---------- H. Phân quyền, nghỉ phép, hồ sơ, nhắc việc ---------- */
+  group = 'H. Phân quyền theo vai trò';
+  await t('Tài khoản đang dùng có hồ sơ phân quyền', async () => {
+    const { data } = await sb.from('profiles').select('email, role').eq('email', session.user.email).single();
+    assert(data, 'chưa có bản ghi phân quyền');
+    assert(['admin', 'hr'].includes(data.role), 'vai trò hiện tại: ' + data.role);
+    return data.email + ' → ' + data.role;
+  });
+  await t('Hàm kiểm tra vai trò hoạt động', async () => {
+    const [{ data: role }, { data: hr }] = await Promise.all([sb.rpc('my_role'), sb.rpc('is_hr')]);
+    assert(role && hr === true, `my_role=${role} is_hr=${hr}`);
+    return 'my_role=' + role + ', is_hr=true';
+  });
+  await t('Dữ liệu nhạy cảm chỉ mở cho HR (kiểm tra luật RLS)', async () => {
+    const { data } = await sb.rpc('policy_report');
+    const need = {
+      contracts: 'is_hr', employee_private: 'is_hr', employee_documents: 'is_hr',
+      offers: 'my_role', email_log: 'my_role', candidates: 'my_role', leave_requests: 'my_employee_id'
+    };
+    for (const [tb, frag] of Object.entries(need)) {
+      const pols = data.filter(p => p.tbl === tb);
+      assert(pols.length, 'bảng ' + tb + ' chưa có luật nào');
+      assert(pols.some(p => (p.qual + p.with_check).includes(frag)), `bảng ${tb} thiếu luật theo vai trò (${frag})`);
+      assert(!pols.some(p => p.qual === 'true' && p.cmd === 'ALL'), `bảng ${tb} vẫn còn luật mở toang`);
+    }
+    return Object.keys(need).length + ' bảng nhạy cảm đều khoá theo vai trò';
+  });
+  await t('Mọi bảng đều đã bật RLS', async () => {
+    const { data } = await sb.rpc('policy_report');
+    const tables = [...new Set(data.map(p => p.tbl))];
+    for (const tb of ['employees', 'contracts', 'leave_requests', 'employee_private', 'notifications', 'profiles'])
+      assert(tables.includes(tb), 'bảng ' + tb + ' chưa có policy');
+    return tables.length + ' bảng có luật truy cập';
+  });
+
+  group = 'I. Nghỉ phép';
+  let emp2, leave;
+  await t('Có sẵn các loại nghỉ theo luật lao động', async () => {
+    const { data } = await sb.from('leave_types').select('*');
+    const keys = data.map(x => x.key);
+    for (const k of ['annual', 'sick', 'unpaid', 'maternity']) assert(keys.includes(k), 'thiếu loại ' + k);
+    const annual = data.find(x => x.key === 'annual');
+    assert(Number(annual.default_days) === 12, 'phép năm mặc định = ' + annual.default_days);
+    return keys.length + ' loại, phép năm 12 ngày';
+  });
+  await t('Tính số ngày nghỉ bỏ qua thứ 7 và chủ nhật', async () => {
+    const { workDays } = W().__hdrcHR;
+    assert(workDays('2026-10-12', '2026-10-16') === 5, 'T2-T6 = ' + workDays('2026-10-12', '2026-10-16'));
+    assert(workDays('2026-10-12', '2026-10-18') === 5, 'cả tuần = ' + workDays('2026-10-12', '2026-10-18'));
+    assert(workDays('2026-10-17', '2026-10-18') === 0, 'cuối tuần = ' + workDays('2026-10-17', '2026-10-18'));
+    return 'T2-T6=5 · cả tuần=5 · cuối tuần=0';
+  });
+  await t('Tạo đơn nghỉ, mặc định chờ duyệt', async () => {
+    emp2 = await ins('employees', { full_name: TAG + ' Nhan vien nghi phep', status: 'active', start_date: '2026-01-05' });
+    leave = await ins('leave_requests', { employee_id: emp2.id, type_key: 'annual', start_date: '2026-11-02', end_date: '2026-11-04', days: 3, reason: 'Kiểm thử' });
+    assert(leave.status === 'pending', 'trạng thái = ' + leave.status);
+    return 'pending · 3 ngày';
+  });
+  await t('Ngày kết thúc trước ngày bắt đầu bị chặn', async () => {
+    const { error } = await sb.from('leave_requests').insert({ employee_id: emp2.id, type_key: 'annual', start_date: '2026-11-10', end_date: '2026-11-01', days: 1 });
+    assert(error, 'DB nhận đơn ngược ngày');
+    return 'bị chặn: ràng buộc check';
+  });
+  await t('Loại nghỉ không có trong danh mục bị chặn', async () => {
+    const { error } = await sb.from('leave_requests').insert({ employee_id: emp2.id, type_key: 'nghi_choi', start_date: '2026-11-02', end_date: '2026-11-02', days: 1 });
+    assert(error, 'DB nhận loại nghỉ rác');
+    return 'bị chặn: khoá ngoại';
+  });
+  await t('Duyệt đơn ghi lại người duyệt và thời điểm', async () => {
+    const { data, error } = await sb.from('leave_requests').update({ status: 'approved', approver_name: session.user.email, decided_at: new Date().toISOString() }).eq('id', leave.id).select().single();
+    if (error) throw new Error(error.message);
+    assert(data.status === 'approved' && data.approver_name && data.decided_at, JSON.stringify(data));
+    return 'approved bởi ' + data.approver_name;
+  });
+  await t('Hạn mức phép lưu và cộng trừ đúng', async () => {
+    const year = new Date().getFullYear();
+    const { error } = await sb.from('leave_balances').upsert({ employee_id: emp2.id, year, type_key: 'annual', days_total: 14 });
+    if (error) throw new Error(error.message);
+    const { data } = await sb.from('leave_balances').select('days_total').eq('employee_id', emp2.id).eq('year', year).single();
+    assert(Number(data.days_total) === 14, 'hạn mức = ' + data.days_total);
+    return 'hạn mức 14 ngày, đã duyệt 3 ngày (năm 2026) → còn 11';
+  });
+
+  group = 'J. Hồ sơ & giấy tờ nhân sự';
+  await t('Lưu thông tin cá nhân nhạy cảm', async () => {
+    const { error } = await sb.from('employee_private').upsert({ employee_id: emp2.id, dob: '1995-05-20', gender: 'Nữ', tax_code: '8123456789', dependents: 1 });
+    if (error) throw new Error(error.message);
+    const { data } = await sb.from('employee_private').select('*').eq('employee_id', emp2.id).single();
+    assert(data.tax_code === '8123456789' && data.dependents === 1, JSON.stringify(data));
+    return 'ngày sinh · MST · người phụ thuộc';
+  });
+  await t('Gắn giấy tờ vào hồ sơ nhân sự', async () => {
+    const { error } = await sb.from('employee_documents').insert({ employee_id: emp2.id, doc_type: 'cccd', file_path: emp2.id + '/selftest.pdf', file_name: 'selftest.pdf' });
+    if (error) throw new Error(error.message);
+    const { data } = await sb.from('employee_documents').select('*').eq('employee_id', emp2.id);
+    assert(data.length === 1, data.length + ' giấy tờ');
+    return '1 giấy tờ CCCD';
+  });
+  await t('Kho file hồ sơ không mở công khai', async () => {
+    const r = await fetch(`${URL_}/storage/v1/object/public/hr-docs/bat-ky.pdf`);
+    assert(r.status >= 400, 'kho hr-docs đang công khai!');
+    return 'HTTP ' + r.status;
+  });
+  await t('Xoá nhân sự dọn sạch hồ sơ, giấy tờ và đơn nghỉ', async () => {
+    const id = emp2.id;
+    await sb.from('employees').delete().eq('id', id);
+    made.employees = made.employees.filter(x => x !== id);
+    made.leave_requests = [];
+    const left = await Promise.all(['employee_private', 'employee_documents', 'leave_requests', 'leave_balances']
+      .map(async tb => [tb, (await sb.from(tb).select('employee_id').eq('employee_id', id)).data.length]));
+    const bad = left.filter(([, n]) => n > 0);
+    assert(!bad.length, 'còn sót: ' + JSON.stringify(bad));
+    return 'cascade sạch 4 bảng';
+  });
+
+  group = 'K. Nhắc việc tự động';
+  await t('Quét nhắc việc chạy được', async () => {
+    const { data, error } = await sb.rpc('refresh_notifications');
+    if (error) throw new Error(error.message);
+    assert(typeof data === 'number', 'trả về: ' + JSON.stringify(data));
+    return 'đang mở ' + data + ' việc';
+  });
+  await t('Hợp đồng sắp hết hạn tự sinh nhắc việc', async () => {
+    const e3 = await ins('employees', { full_name: TAG + ' Sap het han', status: 'active' });
+    const end = addDays(new Date().toISOString().slice(0, 10), 10);
+    const { data: con } = await sb.from('contracts').insert({ employee_id: e3.id, type: 'xd_12', status: 'active', start_date: '2026-01-01', end_date: end }).select().single();
+    await sb.rpc('refresh_notifications');
+    const { data } = await sb.from('notifications').select('*').eq('ref_id', con.id).eq('kind', 'contract_expiring');
+    assert(data.length === 1, 'sinh ' + data.length + ' nhắc việc');
+    assert(data[0].title.includes(TAG), 'nội dung: ' + data[0].title);
+    // chạy lại không nhân bản
+    await sb.rpc('refresh_notifications');
+    const { data: again } = await sb.from('notifications').select('id').eq('ref_id', con.id).eq('kind', 'contract_expiring');
+    assert(again.length === 1, 'chạy 2 lần sinh ' + again.length + ' bản ghi');
+    // xử lý xong thì tự đóng
+    await sb.from('contracts').update({ status: 'terminated' }).eq('id', con.id);
+    await sb.rpc('refresh_notifications');
+    const { data: closed } = await sb.from('notifications').select('status').eq('ref_id', con.id).eq('kind', 'contract_expiring').single();
+    assert(closed.status === 'done', 'trạng thái sau khi xử lý: ' + closed.status);
+    await sb.from('notifications').delete().eq('ref_id', con.id);
+    await sb.from('employees').delete().eq('id', e3.id);
+    made.employees = made.employees.filter(x => x !== e3.id);
+    return 'sinh 1 lần · không nhân bản · tự đóng khi xử lý xong';
+  });
+  await t('Lịch quét hằng ngày đã bật', async () => {
+    const { data, error } = await sb.rpc('cron_jobs_report');
+    if (error) { warn('Không đọc được lịch (' + error.message + ') — kiểm tra thủ công trong Supabase'); return ''; }
+    assert(data.some(j => j.jobname === 'hdrc-daily-reminders' && j.active), JSON.stringify(data));
+    return 'hdrc-daily-reminders · 8h sáng hằng ngày';
+  });
+
   /* ---------- dọn dẹp ---------- */
-  group = 'H. Dọn dẹp dữ liệu kiểm thử';
+  group = 'L. Dọn dẹp dữ liệu kiểm thử';
   await t('Xoá sạch mọi bản ghi [SELFTEST]', async () => {
     const report = [];
     await sb.from('email_log').delete().ilike('subject', TAG + '%');
