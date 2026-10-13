@@ -41,7 +41,7 @@ iframe{width:1200px;height:800px;border:0;position:absolute;left:-4000px;top:0}
     <div><b id="kFail">–</b><span class="sub">Lỗi</span></div>
     <div><b id="kWarn">–</b><span class="sub">Cảnh báo</span></div>
     <div><b id="kTime">–</b><span class="sub">Thời gian</span></div>
-    <div><b id="kBuild">20261013-1836</b><span class="sub">Phiên bản bộ test</span></div>
+    <div><b id="kBuild">20261013-1848</b><span class="sub">Phiên bản bộ test</span></div>
   </div>
   <table id="out"><thead><tr><th style="width:60px">KQ</th><th>Hạng mục</th><th>Chi tiết</th></tr></thead><tbody></tbody></table>
   <div id="log"></div>
@@ -213,7 +213,7 @@ async function runAll() {
     assert(c.full_name === 'NGUYEN NGOC PHUONG TRANG', 'tên = ' + c.full_name);
     assert(c.years_experience === 2.8, 'năm = ' + c.years_experience);
     assert(c.phone === '0987654321', 'phone = ' + c.phone);
-    return `${c.full_name} · ${c.years_experience} năm`;
+    return `${c.full_name} · ${c.years_experience} năm · bộ đọc ${data.build || '?'} (${data.engine})`;
   });
   await t('File mô tả công việc KHÔNG bị nhận nhầm thành ứng viên', async () => {
     const text = `JOB DESCRIPTION\nDigital Marketing Senior Lead (Content & Social)\nHeliDirect is hiring. Requirements: 5 years experience, Shopify knowledge. Benefits: salary.`;
