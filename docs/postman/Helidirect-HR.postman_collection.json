@@ -1,0 +1,1683 @@
+{
+  "info": {
+    "_postman_id": "fe411182-c059-5fa5-8ee6-dc26e6205287",
+    "name": "Helidirect HR API",
+    "description": "API của hr.helidirect.io (Laravel). Đăng nhập bằng phiên cookie + CSRF.\n\n1. Chọn environment (Local hoặc Production).\n2. Chạy \"0. Bắt đầu → Lấy cookie CSRF\" rồi \"Đăng nhập\".\n3. Gọi API bất kỳ. Request tạo dữ liệu tự lưu id (jobId, candidateId, userId) cho các request sau.\n\nLỗi thường gặp: 401 = chưa đăng nhập · 403 = vai trò không có quyền (hoặc admin chưa bật 2FA) · 419 = token CSRF cũ, chạy lại \"Lấy cookie CSRF\" · 422 = dữ liệu không hợp lệ (xem `errors`).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Header chung cho mọi request",
+          "pm.request.headers.upsert({ key: 'Accept', value: 'application/json' });",
+          "pm.request.headers.upsert({ key: 'X-Requested-With', value: 'XMLHttpRequest' });",
+          "const xsrf = pm.collectionVariables.get('xsrf');",
+          "if (xsrf) pm.request.headers.upsert({ key: 'X-XSRF-TOKEN', value: xsrf });"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Lưu token CSRF mới nhất (Laravel đặt lại cookie XSRF-TOKEN trên mọi response)",
+          "const c = pm.cookies.get('XSRF-TOKEN');",
+          "if (c) pm.collectionVariables.set('xsrf', decodeURIComponent(c));",
+          "if (pm.response.code === 419) console.warn('419: token CSRF hết hạn — chạy lại \"Lấy cookie CSRF\".');",
+          "if (pm.response.code === 401) console.warn('401: chưa đăng nhập — chạy \"Đăng nhập\".');"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "xsrf",
+      "value": ""
+    },
+    {
+      "key": "jobId",
+      "value": ""
+    },
+    {
+      "key": "candidateId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "roleKey",
+      "value": "truong_nhom_td"
+    },
+    {
+      "key": "totpSecret",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Bắt đầu — đăng nhập",
+      "description": "Thứ tự: Lấy cookie CSRF → Đăng nhập → (Nhập mã 2FA) → gọi API bất kỳ.",
+      "item": [
+        {
+          "name": "Lấy cookie CSRF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "login"
+              ]
+            },
+            "description": "Chạy đầu tiên: server trả cookie phiên + XSRF-TOKEN. Collection tự lưu token."
+          },
+          "event": [],
+          "_postman_id": "691ecbf4-596a-5f1a-b5da-1c2844e1c078"
+        },
+        {
+          "name": "Đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "login"
+              ]
+            },
+            "description": "200 `{\"two_factor\": false}` = đã đăng nhập. `{\"two_factor\": true}` = tài khoản có 2FA → chạy \"Nhập mã 2FA\". Sai 5 lần trong 15 phút (theo email + IP) thì bị chặn.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"remember\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "90d142ec-d016-5fd1-99a4-e052ff2954bf"
+        },
+        {
+          "name": "Nhập mã 2FA (sau khi đăng nhập)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/two-factor-challenge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "two-factor-challenge"
+              ]
+            },
+            "description": "Mã 6 số từ app Authenticator. Hoặc gửi `{\"recovery_code\": \"...\"}`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{otp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "5f547ee6-ef35-5db3-9834-1534c4ecedbf"
+        },
+        {
+          "name": "Thông tin của tôi + ma trận quyền",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "me"
+              ]
+            },
+            "description": "`two_factor_required: true` = admin chưa bật 2FA; mọi API khác trả 403 `two_factor_required`."
+          },
+          "event": [],
+          "_postman_id": "ce175011-7a62-52a8-98d3-a15e7bfa94e1"
+        },
+        {
+          "name": "Đăng xuất",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "logout"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "1a5ae3bb-8a6e-55d4-8da9-df7cedd16162"
+        }
+      ],
+      "_postman_id": "8f6be090-f70f-5b00-af36-a270cfe6d77e"
+    },
+    {
+      "name": "1. Mật khẩu & 2FA",
+      "description": "",
+      "item": [
+        {
+          "name": "Quên mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forgot-password"
+              ]
+            },
+            "description": "Luôn trả cùng một thông báo dù email có tồn tại hay không. Thư chứa link /reset-password?token=…&email=…",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "60a8054b-afc9-55e1-b4b1-0ffe78533f49"
+        },
+        {
+          "name": "Đặt lại mật khẩu (từ link email)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reset-password"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"TOKEN_TRONG_EMAIL\",\n  \"email\": \"{{email}}\",\n  \"password\": \"Mat-khau-moi-123\",\n  \"password_confirmation\": \"Mat-khau-moi-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "4ab2f203-05fa-5231-811f-03e4b4daa1fe"
+        },
+        {
+          "name": "Nhận lời mời (đặt mật khẩu lần đầu)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/accept-invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accept-invite"
+              ]
+            },
+            "description": "Link mời hạn 72 giờ, dùng một lần. Không tự đăng nhập.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"TOKEN_TRONG_EMAIL\",\n  \"email\": \"nguoi.moi@helidirect.com\",\n  \"password\": \"Mat-khau-moi-123\",\n  \"password_confirmation\": \"Mat-khau-moi-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "de9cce3b-3e56-5d35-aa6f-3e6b1ed1dfa1"
+        },
+        {
+          "name": "Đổi mật khẩu",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "password"
+              ]
+            },
+            "description": "Đổi xong thì các thiết bị khác bị đăng xuất.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"{{password}}\",\n  \"password\": \"Mat-khau-moi-123\",\n  \"password_confirmation\": \"Mat-khau-moi-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "1a943fb6-08a6-55ae-9219-5ce0e2869210"
+        },
+        {
+          "name": "Xác nhận mật khẩu (trước thao tác bảo mật)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/confirm-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "confirm-password"
+              ]
+            },
+            "description": "Cần trước các route 2FA bên dưới. Đăng nhập bằng mật khẩu cũng được tính là vừa xác nhận.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "2138daa1-73b2-5cc6-95fd-59408a082f9a"
+        },
+        {
+          "name": "Trạng thái xác nhận mật khẩu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/confirmed-password-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "confirmed-password-status"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "b6cd4828-04d8-51a4-9dd7-e9988069efc1"
+        },
+        {
+          "name": "2FA ① Bật (tạo secret)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/two-factor-authentication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "two-factor-authentication"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "2da3dde4-b508-5bc5-bbac-de7de1311d65"
+        },
+        {
+          "name": "2FA ② Lấy mã QR (SVG)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/two-factor-qr-code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "two-factor-qr-code"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "dc933418-6876-581d-90a1-c1c89b44d2cb"
+        },
+        {
+          "name": "2FA ② Lấy khoá thủ công",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/two-factor-secret-key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "two-factor-secret-key"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) pm.collectionVariables.set('totpSecret', pm.response.json().secretKey);"
+                ]
+              }
+            }
+          ],
+          "_postman_id": "de63e0d6-9bca-54bd-90bb-7c5ff23aeea2"
+        },
+        {
+          "name": "2FA ③ Xác nhận bằng mã 6 số",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/confirmed-two-factor-authentication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "confirmed-two-factor-authentication"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{otp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "d9395a84-c433-571e-b8d7-590fe82d0f96"
+        },
+        {
+          "name": "2FA ④ Xem mã khôi phục",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/two-factor-recovery-codes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "two-factor-recovery-codes"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "b37876ad-c019-575a-9359-2e09f1f94eab"
+        },
+        {
+          "name": "2FA Tạo lại mã khôi phục",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/two-factor-recovery-codes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "two-factor-recovery-codes"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "d7020766-4fd0-5ecb-a4e5-631f710a3eac"
+        },
+        {
+          "name": "2FA Tắt",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/user/two-factor-authentication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "two-factor-authentication"
+              ]
+            },
+            "description": "Admin tắt xong sẽ bị buộc bật lại."
+          },
+          "event": [],
+          "_postman_id": "8abb0457-6bd1-56c6-8a2a-fc6e1df50ba1"
+        }
+      ],
+      "_postman_id": "a1ea37f7-2f08-527d-9612-b0c98d4be257"
+    },
+    {
+      "name": "2. Người dùng (quyền settings)",
+      "description": "",
+      "item": [
+        {
+          "name": "Danh sách",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users?",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lọc: q (tên/email), status = invited | active | locked."
+          },
+          "event": [],
+          "_postman_id": "3c844dc3-cbce-50f3-a727-fed96b9d6cc9"
+        },
+        {
+          "name": "Mời người dùng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
+            },
+            "description": "Tạo trạng thái invited + gửi thư mời. `invite_sent: false` = SMTP chưa cấu hình (local ghi vào log).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nguyễn Văn Test\",\n  \"email\": \"postman.{{$timestamp}}@helidirect.com\",\n  \"role_key\": \"staff\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  const v = pm.response.json().data.id;",
+                  "  if (v) pm.collectionVariables.set('userId', v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "_postman_id": "dbd70f83-743c-5b98-8863-670b3eaf085f"
+        },
+        {
+          "name": "Sửa (tên, vai trò)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nguyễn Văn Test 2\",\n  \"role_key\": \"manager\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "550f5716-5a43-5626-8b38-5d8870f36e1f"
+        },
+        {
+          "name": "Khoá",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/lock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "lock"
+              ]
+            },
+            "description": "Huỷ ngay mọi phiên của người đó."
+          },
+          "event": [],
+          "_postman_id": "2adca935-e857-5ec1-aa7d-914c4dada27c"
+        },
+        {
+          "name": "Mở khoá",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/unlock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "unlock"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "e34b3df2-2ab3-582c-94b1-348206dee95e"
+        },
+        {
+          "name": "Gửi lại lời mời",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/resend-invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "resend-invite"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "2a11528d-1d47-5cea-9dc8-cc07867e9cfa"
+        },
+        {
+          "name": "Đặt lại 2FA (chỉ admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/reset-two-factor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}",
+                "reset-two-factor"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "886fb721-9a08-5cd9-ba4c-ea72fda33d84"
+        }
+      ],
+      "_postman_id": "883cb2d3-288a-5a00-a9c1-61a8117a9845"
+    },
+    {
+      "name": "3. Vai trò & ma trận quyền (quyền settings)",
+      "description": "",
+      "item": [
+        {
+          "name": "Danh sách vai trò + ma trận",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "roles"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "209f5900-980e-517e-9baf-bd46c97b485e"
+        },
+        {
+          "name": "Tạo vai trò",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "roles"
+              ]
+            },
+            "description": "base = admin | hr | manager | staff (quyết định tab và phạm vi dữ liệu). Mã vai trò tự sinh mỗi lần chạy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"{{roleKey}}\",\n  \"label\": \"Trưởng nhóm tuyển dụng\",\n  \"base\": \"staff\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('roleKey', 'td_' + Date.now());"
+                ]
+              }
+            }
+          ],
+          "_postman_id": "6de4dd2d-674c-5c11-b0da-654eaa9f1e8a"
+        },
+        {
+          "name": "Sửa vai trò",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/roles/{{roleKey}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "roles",
+                "{{roleKey}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Trưởng nhóm TD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "a29ea784-faee-5005-b423-4782718a4306"
+        },
+        {
+          "name": "Ghi ma trận quyền",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/roles/{{roleKey}}/perms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "roles",
+                "{{roleKey}}",
+                "perms"
+              ]
+            },
+            "description": "Gửi cả ma trận: ô không có = false. Module: candidates, jobs, offers, employees, contracts, leave, onboarding, probation, mail, reports, backups, settings. Hành động: view, create, edit, delete, approve, comment.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"perms\": {\n    \"candidates\": {\n      \"view\": true,\n      \"create\": true,\n      \"edit\": true,\n      \"comment\": true\n    },\n    \"jobs\": {\n      \"view\": true\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "8404d0d1-6770-56ce-a1a5-b95c9de95583"
+        }
+      ],
+      "_postman_id": "b6afe585-2546-55e1-99c3-6f4808e4d4ee"
+    },
+    {
+      "name": "4. Nhật ký thao tác (quyền settings.view)",
+      "description": "",
+      "item": [
+        {
+          "name": "Danh sách (phân trang 50)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/audit-logs?action=auth.&page=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "audit-logs"
+              ],
+              "query": [
+                {
+                  "key": "action",
+                  "value": "auth.",
+                  "disabled": false
+                },
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "action kết thúc bằng dấu chấm = cả nhóm (auth., user., role., jobs., candidates.); không có dấu chấm = khớp đúng."
+          },
+          "event": [],
+          "_postman_id": "288bb407-bd57-5150-b8e0-f8f508d51fba"
+        }
+      ],
+      "_postman_id": "7c728a1d-a96b-55c6-82a0-05d05364f58b"
+    },
+    {
+      "name": "5. Vị trí & JD (quyền jobs)",
+      "description": "",
+      "item": [
+        {
+          "name": "Danh sách",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs"
+              ]
+            },
+            "description": "Có candidates_count / hired_count nếu bạn có quyền candidates.view."
+          },
+          "event": [],
+          "_postman_id": "8d33c8ad-123d-5991-ad1b-80f4c04913a4"
+        },
+        {
+          "name": "Tạo vị trí",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs"
+              ]
+            },
+            "description": "employment_type: Full-time | Part-time | Thực tập | Thời vụ. target_date dạng yyyy-mm-dd.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Data Analyst\",\n  \"department\": \"Marketing\",\n  \"headcount\": 2,\n  \"location\": \"HCM\",\n  \"employment_type\": \"Full-time\",\n  \"hiring_manager\": \"Nguyễn Văn A\",\n  \"salary_range\": \"15-20tr\",\n  \"target_date\": \"2026-12-31\",\n  \"is_open\": true,\n  \"jd_summary\": \"Phân tích dữ liệu bán hàng\",\n  \"jd_responsibilities\": \"Làm báo cáo tuần\\nXây dashboard\",\n  \"jd_requirements\": \"2 năm SQL\\nPower BI\",\n  \"jd_benefits\": \"Lương tháng 13\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  const v = pm.response.json().data.id;",
+                  "  if (v) pm.collectionVariables.set('jobId', v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "_postman_id": "4037ef20-3cf1-56de-81b0-3aa60a3cc5b1"
+        },
+        {
+          "name": "Chi tiết",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/{{jobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs",
+                "{{jobId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "89208f3c-0fed-5fe2-a899-d47a45b463b7"
+        },
+        {
+          "name": "Sửa",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/{{jobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs",
+                "{{jobId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_open\": false,\n  \"headcount\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "a1d07e24-6848-57f8-bbb9-f1dd9d55d9bb"
+        }
+      ],
+      "_postman_id": "fdf8f26d-8633-5777-9c11-f04f3c092b56"
+    },
+    {
+      "name": "6. Tuyển dụng — ứng viên (quyền candidates)",
+      "description": "",
+      "item": [
+        {
+          "name": "Danh sách vòng tuyển",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "stages"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "f477b8c4-d6d9-5aa5-8579-8fae14f818e9"
+        },
+        {
+          "name": "Danh sách ứng viên",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates?",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates"
+              ],
+              "query": [
+                {
+                  "key": "job_id",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "dcea9517-2152-53a2-9740-198615867d58"
+        },
+        {
+          "name": "Tạo ứng viên",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Trần Thị B\",\n  \"email\": \"b.tran@gmail.com\",\n  \"phone\": \"0912345678\",\n  \"current_title\": \"Data Analyst\",\n  \"current_company\": \"ACB\",\n  \"years_experience\": 2.8,\n  \"source\": \"TopCV\",\n  \"job_id\": \"{{jobId}}\",\n  \"stage\": \"new\",\n  \"skills\": [\n    \"SQL\",\n    \"Excel\",\n    \"Power BI\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  const v = pm.response.json().data.id;",
+                  "  if (v) pm.collectionVariables.set('candidateId', v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "_postman_id": "e67f7ae2-7eb1-5165-979f-2fd5b34ca755"
+        },
+        {
+          "name": "Chi tiết (kèm lịch sử)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "a9a2af7c-263c-5ede-9449-65f137647cac"
+        },
+        {
+          "name": "Sửa",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_title\": \"Senior Data Analyst\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "b39e9885-66d2-5144-9f57-a5d280f426d9"
+        },
+        {
+          "name": "Chuyển vòng",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}/stage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}",
+                "stage"
+              ]
+            },
+            "description": "Server tự ghi sự kiện stage_change vào lịch sử.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"phone\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "85e9a49f-bf96-59e0-a974-3a746bfc2631"
+        },
+        {
+          "name": "Đổi trạng thái (loại / mở lại)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}",
+                "status"
+              ]
+            },
+            "description": "status = active | rejected | withdrawn.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"rejected\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "0b84ee0b-5a2a-5830-abef-7b1b16e34261"
+        },
+        {
+          "name": "Thêm ghi chú (quyền comment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}",
+                "notes"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Phỏng vấn tốt, mong muốn 18tr\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "840826d2-8ee5-5d6d-badf-f3bf12bba810"
+        },
+        {
+          "name": "Tải CV lên",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}/cv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}",
+                "cv"
+              ]
+            },
+            "description": "multipart, field `file`: .pdf / .docx / .txt, tối đa 15 MB. Chọn file ở tab Body.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "event": [],
+          "_postman_id": "c3249bec-9e84-5928-906c-170ae8beedb2"
+        },
+        {
+          "name": "Tải CV về",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}/cv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}",
+                "cv"
+              ]
+            },
+            "description": "Trả file dạng attachment. Bấm Save Response → Save to a file."
+          },
+          "event": [],
+          "_postman_id": "709c2b0e-0e35-5637-a87c-f97704262e3c"
+        },
+        {
+          "name": "Xoá CV",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}/cv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}",
+                "cv"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "cdbd4bcb-5a71-509c-b151-8ac15d9d6e58"
+        },
+        {
+          "name": "Đọc CV (AI / quy tắc)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/parse-cv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "parse-cv"
+              ]
+            },
+            "description": "engine = ai khi có ANTHROPIC_API_KEY, ngược lại rules. Văn bản < 20 ký tự → 400. Giới hạn 30 lần/phút.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"TopCV-TranMinhHoang.pdf\",\n  \"text\": \"CURRICULUM VITAE\\nTran Minh Hoang\\nSenior Data Analyst at Tiki\\nhoang.tran@gmail.com\\n0912345678\\n\\nSUMMARY\\n5 years of experience in analytics. SQL, Python, Power BI.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "45362561-6d76-59b2-84e4-4e891e495e42"
+        }
+      ],
+      "_postman_id": "2006cf57-0f2b-5fb2-b6ab-035ae42740bd"
+    },
+    {
+      "name": "7. Excel (entity = jobs | candidates)",
+      "description": "",
+      "item": [
+        {
+          "name": "Mẫu nhập (tiêu đề + dòng mẫu + hướng dẫn)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/excel/jobs/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "excel",
+                "jobs",
+                "template"
+              ]
+            },
+            "description": ""
+          },
+          "event": [],
+          "_postman_id": "aa0fc8ec-b2fe-5ba1-bbd0-81cab005af27"
+        },
+        {
+          "name": "Xuất dữ liệu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/excel/jobs/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "excel",
+                "jobs",
+                "export"
+              ]
+            },
+            "description": "Trả JSON; giao diện web chuyển thành file .xlsx."
+          },
+          "event": [],
+          "_postman_id": "e5d56671-71b6-5540-8699-f4b003d3a65c"
+        },
+        {
+          "name": "Xem trước khi nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/excel/jobs/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "excel",
+                "jobs",
+                "preview"
+              ]
+            },
+            "description": "Body = các ô đọc từ file: v = giá trị gốc, s = chuỗi hiển thị. Mẫu có 1 dòng lỗi để xem báo lỗi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"headers\": [\n    \"Tên vị trí *\",\n    \"Phòng ban\",\n    \"Số lượng\",\n    \"Hạn tuyển xong (yyyy-mm-dd)\",\n    \"Đang tuyển (Có/Không)\"\n  ],\n  \"rows\": [\n    [\n      {\n        \"v\": \"Content Executive\",\n        \"s\": \"Content Executive\"\n      },\n      {\n        \"v\": \"Marketing\",\n        \"s\": \"Marketing\"\n      },\n      {\n        \"v\": 2,\n        \"s\": \"2\"\n      },\n      {\n        \"v\": \"2026-12-31\",\n        \"s\": \"2026-12-31\"\n      },\n      {\n        \"v\": \"Có\",\n        \"s\": \"Có\"\n      }\n    ],\n    [\n      {\n        \"v\": \"Kế toán\",\n        \"s\": \"Kế toán\"\n      },\n      {\n        \"v\": \"Finance\",\n        \"s\": \"Finance\"\n      },\n      {\n        \"v\": \"hai\",\n        \"s\": \"hai\"\n      },\n      {\n        \"v\": \"31/02/2026\",\n        \"s\": \"31/02/2026\"\n      },\n      {\n        \"v\": \"Không\",\n        \"s\": \"Không\"\n      }\n    ]\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "617749bc-7de9-5518-9f73-7321a5948240"
+        },
+        {
+          "name": "Nhập (ghi dữ liệu)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/excel/jobs/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "excel",
+                "jobs",
+                "import"
+              ]
+            },
+            "description": "Chỉ ghi khi không còn dòng lỗi (có lỗi → 422, không ghi dòng nào). Trùng tên + phòng ban thì cập nhật. Cần quyền create + edit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"headers\": [\n    \"Tên vị trí *\",\n    \"Phòng ban\",\n    \"Số lượng\",\n    \"Hạn tuyển xong (yyyy-mm-dd)\",\n    \"Đang tuyển (Có/Không)\"\n  ],\n  \"rows\": [\n    [\n      {\n        \"v\": \"Content Executive\",\n        \"s\": \"Content Executive\"\n      },\n      {\n        \"v\": \"Marketing\",\n        \"s\": \"Marketing\"\n      },\n      {\n        \"v\": 2,\n        \"s\": \"2\"\n      },\n      {\n        \"v\": \"2026-12-31\",\n        \"s\": \"2026-12-31\"\n      },\n      {\n        \"v\": \"Có\",\n        \"s\": \"Có\"\n      }\n    ]\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "_postman_id": "54efe2aa-5ed8-502d-a0e6-6c0fac502d26"
+        }
+      ],
+      "_postman_id": "4e540f29-fa77-513a-8810-dea702c7aeae"
+    },
+    {
+      "name": "8. Hệ thống",
+      "description": "",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/up",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "up"
+              ]
+            },
+            "description": "200 khi app chạy (không cần đăng nhập)."
+          },
+          "event": [],
+          "_postman_id": "2c8ee867-ffa3-5daa-8834-ccd27c710edd"
+        }
+      ],
+      "_postman_id": "99b0993f-b4ac-5477-9a2f-f1261259dea4"
+    },
+    {
+      "name": "9. Dọn dẹp (xoá dữ liệu vừa tạo)",
+      "description": "Chạy cuối cùng. Người dùng không xoá được (chỉ khoá) để giữ lịch sử thao tác.",
+      "item": [
+        {
+          "name": "Xoá ứng viên",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/{{candidateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "candidates",
+                "{{candidateId}}"
+              ]
+            },
+            "description": "Cần candidates.delete. Xoá luôn thư mục CV."
+          },
+          "event": [],
+          "_postman_id": "b9e48d1e-d0aa-58c9-8239-9325924f8bc4"
+        },
+        {
+          "name": "Xoá vị trí",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/{{jobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "jobs",
+                "{{jobId}}"
+              ]
+            },
+            "description": "Cần jobs.delete. Ứng viên của vị trí giữ nguyên, job_id → null."
+          },
+          "event": [],
+          "_postman_id": "955454d8-9e82-58ad-ab0f-4440439f8144"
+        },
+        {
+          "name": "Xoá vai trò",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/roles/{{roleKey}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "roles",
+                "{{roleKey}}"
+              ]
+            },
+            "description": "Cần settings.delete (mặc định chỉ admin). Không xoá được vai trò hệ thống hoặc vai trò đang có người dùng."
+          },
+          "event": [],
+          "_postman_id": "928a7f31-fa06-59e8-ab70-e5c000cbda4f"
+        }
+      ],
+      "_postman_id": "9ec49ded-dfe1-5d68-ad74-001b75606ac5"
+    }
+  ]
+}
